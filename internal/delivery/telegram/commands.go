@@ -631,11 +631,11 @@ func (h *Handler) handleUndo(c telebot.Context) error {
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("↩️ Отменено %d запис(ей):\n", len(voided)))
+	fmt.Fprintf(&sb, "↩️ Отменено %d запис(ей):\n", len(voided))
 	for _, e := range voided {
 		player, _ := h.player.GetByID(ctx, e.PlayerTgID)
-		sb.WriteString(fmt.Sprintf("• %s — %s %d₽\n",
-			formatPlayerByID(player, e.PlayerTgID), e.Type, e.AmountRub))
+		fmt.Fprintf(&sb, "• %s — %s %d₽\n",
+			formatPlayerByID(player, e.PlayerTgID), e.Type, e.AmountRub)
 	}
 	return c.Reply(sb.String())
 }
@@ -701,7 +701,7 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 	dealer, _ := h.player.GetByID(ctx, game.DealerTgID)
 
 	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("🎮 Игра #%d\n", game.ID))
+	fmt.Fprintf(&sb, "🎮 Игра #%d\n", game.ID)
 	sb.WriteString(fmt.Sprintf("Дилер: %s\n", formatPlayerByID(dealer, game.DealerTgID)))
 	sb.WriteString(fmt.Sprintf("Курс: %s₽/фишку | Buy-in: %d₽ | Rebuy: %d₽\n",
 		formatRate(game.BuyInRub, game.BuyInChips), game.BuyInRub, game.RebuyRub))
