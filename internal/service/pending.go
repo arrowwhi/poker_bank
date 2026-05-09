@@ -10,31 +10,38 @@ import (
 	"poker_bank/internal/interfaces"
 )
 
+// PendingService manages pending action records awaiting dealer confirmation.
 type PendingService struct {
 	pending interfaces.PendingActionRepository
 	log     *zap.Logger
 }
 
+// NewPendingService creates a new PendingService backed by the given repository.
 func NewPendingService(pending interfaces.PendingActionRepository, log *zap.Logger) *PendingService {
 	return &PendingService{pending: pending, log: log}
 }
 
+// Create stores a new pending action and returns its generated ID.
 func (s *PendingService) Create(ctx context.Context, a *domain.PendingAction) (int64, error) {
 	return s.pending.Create(ctx, a)
 }
 
+// GetByID retrieves a pending action by its primary key.
 func (s *PendingService) GetByID(ctx context.Context, id int64) (*domain.PendingAction, error) {
 	return s.pending.GetByID(ctx, id)
 }
 
+// GetPending returns the open pending action for a given game, target player, and action type.
 func (s *PendingService) GetPending(ctx context.Context, gameID int64, targetTgID int64, actionType domain.ActionType) (*domain.PendingAction, error) {
 	return s.pending.GetPending(ctx, gameID, targetTgID, actionType)
 }
 
+// ListByGame returns all open pending actions for a game.
 func (s *PendingService) ListByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error) {
 	return s.pending.ListPendingByGame(ctx, gameID)
 }
 
+// Resolve updates a pending action to the given status and records who resolved it.
 func (s *PendingService) Resolve(ctx context.Context, id int64, status domain.PendingStatus, resolvedByTgID int64) (*domain.PendingAction, error) {
 	return s.pending.Resolve(ctx, id, status, resolvedByTgID)
 }

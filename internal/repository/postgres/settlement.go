@@ -9,14 +9,17 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// SettlementRepo is a PostgreSQL implementation of interfaces.SettlementRepository.
 type SettlementRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewSettlementRepo creates a new SettlementRepo backed by the given connection pool.
 func NewSettlementRepo(db *pgxpool.Pool) *SettlementRepo {
 	return &SettlementRepo{db: db}
 }
 
+// InsertBulk inserts a slice of settlements into the database.
 func (r *SettlementRepo) InsertBulk(ctx context.Context, settlements []domain.Settlement) error {
 	for _, s := range settlements {
 		_, err := r.db.Exec(ctx, `
@@ -30,6 +33,7 @@ func (r *SettlementRepo) InsertBulk(ctx context.Context, settlements []domain.Se
 	return nil
 }
 
+// ListByGame returns all settlements for the given game ordered by ID.
 func (r *SettlementRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.Settlement, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, game_id, from_tg_id, to_tg_id, amount_rub, is_paid, paid_at
@@ -51,6 +55,7 @@ func (r *SettlementRepo) ListByGame(ctx context.Context, gameID int64) ([]domain
 	return ss, rows.Err()
 }
 
+// MarkPaid marks a settlement as paid and records the payment timestamp.
 func (r *SettlementRepo) MarkPaid(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE settlements SET is_paid = true, paid_at = now() WHERE id = $1`,

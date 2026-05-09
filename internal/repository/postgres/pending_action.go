@@ -10,14 +10,17 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// PendingActionRepo implements interfaces.PendingActionRepository using a PostgreSQL connection pool.
 type PendingActionRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewPendingActionRepo creates a new PendingActionRepo backed by the given connection pool.
 func NewPendingActionRepo(db *pgxpool.Pool) *PendingActionRepo {
 	return &PendingActionRepo{db: db}
 }
 
+// Create inserts a new pending action and returns its generated ID.
 func (r *PendingActionRepo) Create(ctx context.Context, a *domain.PendingAction) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
@@ -34,6 +37,7 @@ func (r *PendingActionRepo) Create(ctx context.Context, a *domain.PendingAction)
 	return id, nil
 }
 
+// GetByID retrieves a pending action by its primary key.
 func (r *PendingActionRepo) GetByID(ctx context.Context, id int64) (*domain.PendingAction, error) {
 	a := &domain.PendingAction{}
 	err := r.db.QueryRow(ctx, `
@@ -50,6 +54,7 @@ func (r *PendingActionRepo) GetByID(ctx context.Context, id int64) (*domain.Pend
 	return a, nil
 }
 
+// GetPending returns the pending action for the given game, target player, and action type.
 func (r *PendingActionRepo) GetPending(ctx context.Context, gameID int64, targetTgID int64, actionType domain.ActionType) (*domain.PendingAction, error) {
 	a := &domain.PendingAction{}
 	err := r.db.QueryRow(ctx, `
@@ -67,6 +72,7 @@ func (r *PendingActionRepo) GetPending(ctx context.Context, gameID int64, target
 	return a, nil
 }
 
+// ListPendingByGame returns all unresolved pending actions for a game ordered by creation time.
 func (r *PendingActionRepo) ListPendingByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, game_id, action_type, requester_tg_id, target_tg_id, payload,
@@ -113,6 +119,7 @@ func (r *PendingActionRepo) Resolve(ctx context.Context, id int64, status domain
 	return a, nil
 }
 
+// ExpireOlderThan marks all still-pending actions older than olderThan as expired and returns the count.
 func (r *PendingActionRepo) ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error) {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE pending_actions

@@ -6,11 +6,8 @@ linters:
     - govet
     - errcheck
     - staticcheck
-    - gosimple
     - ineffassign
     - unused
-    - gofmt
-    - goimports
     - misspell
   settings:
     revive:
@@ -19,10 +16,13 @@ linters:
           severity: warning
         - name: var-naming
           severity: warning
-
-issues:
   exclusions:
     rules:
       - path: _test\.go
         linters:
           - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

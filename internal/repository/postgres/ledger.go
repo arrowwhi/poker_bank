@@ -9,14 +9,17 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// LedgerRepo is a PostgreSQL implementation of interfaces.LedgerRepository.
 type LedgerRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewLedgerRepo creates a new LedgerRepo backed by the given connection pool.
 func NewLedgerRepo(db *pgxpool.Pool) *LedgerRepo {
 	return &LedgerRepo{db: db}
 }
 
+// Create inserts a new ledger entry and returns its generated ID.
 func (r *LedgerRepo) Create(ctx context.Context, e *domain.LedgerEntry) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
@@ -30,6 +33,7 @@ func (r *LedgerRepo) Create(ctx context.Context, e *domain.LedgerEntry) (int64, 
 	return id, nil
 }
 
+// ListByGame returns all ledger entries for the given game ordered by creation time.
 func (r *LedgerRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.LedgerEntry, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, game_id, player_tg_id, type, amount_rub, amount_chips,
@@ -89,6 +93,7 @@ func (r *LedgerRepo) VoidLastN(ctx context.Context, gameID int64, n int) ([]doma
 	return entries, rows.Err()
 }
 
+// GetBank returns the current bank balance for a game (sum of buy-ins and rebuys minus cash-outs).
 func (r *LedgerRepo) GetBank(ctx context.Context, gameID int64) (int, error) {
 	var bank int
 	err := r.db.QueryRow(ctx, `

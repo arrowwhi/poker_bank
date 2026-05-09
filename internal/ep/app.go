@@ -16,6 +16,7 @@ import (
 	"poker_bank/internal/service"
 )
 
+// Run starts the bot application and blocks until an OS signal is received.
 func Run() error {
 	cfg, err := config.Load(".env")
 	if err != nil {

@@ -11,14 +11,17 @@ import (
 	"poker_bank/internal/interfaces"
 )
 
+// GameRepo is a PostgreSQL implementation of interfaces.GameRepository.
 type GameRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewGameRepo creates a new GameRepo backed by the given connection pool.
 func NewGameRepo(db *pgxpool.Pool) *GameRepo {
 	return &GameRepo{db: db}
 }
 
+// Create inserts a new game record and returns its generated ID.
 func (r *GameRepo) Create(ctx context.Context, g *domain.Game) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
@@ -32,6 +35,7 @@ func (r *GameRepo) Create(ctx context.Context, g *domain.Game) (int64, error) {
 	return id, nil
 }
 
+// GetByID retrieves a game by its primary key.
 func (r *GameRepo) GetByID(ctx context.Context, id int64) (*domain.Game, error) {
 	g := &domain.Game{}
 	err := r.db.QueryRow(ctx, `
@@ -49,6 +53,7 @@ func (r *GameRepo) GetByID(ctx context.Context, id int64) (*domain.Game, error) 
 	return g, nil
 }
 
+// GetActiveByChat returns the currently active game for the given chat, or an error if none exists.
 func (r *GameRepo) GetActiveByChat(ctx context.Context, chatID int64) (*domain.Game, error) {
 	g := &domain.Game{}
 	err := r.db.QueryRow(ctx, `
@@ -66,6 +71,7 @@ func (r *GameRepo) GetActiveByChat(ctx context.Context, chatID int64) (*domain.G
 	return g, nil
 }
 
+// ListFinishedByChat returns the most recent finished games for a chat, up to limit rows.
 func (r *GameRepo) ListFinishedByChat(ctx context.Context, chatID int64, limit int) ([]domain.Game, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, chat_id, dealer_tg_id, buy_in_rub, buy_in_chips, rebuy_rub, rebuy_chips,
@@ -95,6 +101,7 @@ func (r *GameRepo) ListFinishedByChat(ctx context.Context, chatID int64, limit i
 	return games, rows.Err()
 }
 
+// UpdateDealer sets a new dealer for the given game.
 func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE games SET dealer_tg_id = $1 WHERE id = $2`,
@@ -143,6 +150,7 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 	})
 }
 
+// Cancel marks a game as cancelled and records the end time.
 func (r *GameRepo) Cancel(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE games SET status = 'cancelled', ended_at = now() WHERE id = $1`,

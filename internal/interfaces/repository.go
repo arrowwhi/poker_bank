@@ -1,3 +1,4 @@
+//nolint:revive // interfaces is an internal package name
 package interfaces
 
 import (
@@ -7,12 +8,14 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// PlayerRepository defines persistence operations for players.
 type PlayerRepository interface {
 	Upsert(ctx context.Context, player *domain.Player) error
 	GetByID(ctx context.Context, tgID int64) (*domain.Player, error)
 	GetByUsername(ctx context.Context, username string) (*domain.Player, error)
 }
 
+// GameRepository defines persistence operations for games.
 type GameRepository interface {
 	Create(ctx context.Context, game *domain.Game) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.Game, error)
@@ -23,6 +26,7 @@ type GameRepository interface {
 	Cancel(ctx context.Context, id int64) error
 }
 
+// FinishGameParams carries all data needed to atomically finish a game.
 type FinishGameParams struct {
 	GameID       int64
 	Results      []domain.GameResult
@@ -30,6 +34,7 @@ type FinishGameParams struct {
 	BankDeltaRub int
 }
 
+// LedgerRepository defines persistence operations for ledger entries.
 type LedgerRepository interface {
 	Create(ctx context.Context, entry *domain.LedgerEntry) (int64, error)
 	ListByGame(ctx context.Context, gameID int64) ([]domain.LedgerEntry, error)
@@ -37,6 +42,7 @@ type LedgerRepository interface {
 	GetBank(ctx context.Context, gameID int64) (int, error)
 }
 
+// ParticipantRepository defines persistence operations for game participants.
 type ParticipantRepository interface {
 	Create(ctx context.Context, p *domain.Participant) error
 	GetByPlayer(ctx context.Context, gameID int64, playerTgID int64) (*domain.Participant, error)
@@ -45,6 +51,7 @@ type ParticipantRepository interface {
 	SetActive(ctx context.Context, gameID int64, playerTgID int64, active bool) error
 }
 
+// PendingActionRepository defines persistence operations for pending actions.
 type PendingActionRepository interface {
 	Create(ctx context.Context, action *domain.PendingAction) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.PendingAction, error)
@@ -54,6 +61,7 @@ type PendingActionRepository interface {
 	ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
+// GameResultRepository defines persistence operations for game results.
 type GameResultRepository interface {
 	InsertBulk(ctx context.Context, results []domain.GameResult) error
 	ListByGame(ctx context.Context, gameID int64) ([]domain.GameResult, error)
@@ -61,12 +69,14 @@ type GameResultRepository interface {
 	GetLeaderboard(ctx context.Context, chatID int64) ([]domain.PlayerChatStats, error)
 }
 
+// SettlementRepository defines persistence operations for settlements.
 type SettlementRepository interface {
 	InsertBulk(ctx context.Context, settlements []domain.Settlement) error
 	ListByGame(ctx context.Context, gameID int64) ([]domain.Settlement, error)
 	MarkPaid(ctx context.Context, id int64) error
 }
 
+// FSMStateRepository defines persistence operations for FSM states.
 type FSMStateRepository interface {
 	Get(ctx context.Context, chatID int64, userTgID int64) (*domain.FSMState, error)
 	Set(ctx context.Context, state *domain.FSMState) error

@@ -2,6 +2,7 @@ package telegram
 
 import "gopkg.in/telebot.v3"
 
+// Register attaches all bot middleware and command handlers to the given bot instance.
 func (h *Handler) Register(b *telebot.Bot) {
 	b.Use(h.UpsertPlayer)
 

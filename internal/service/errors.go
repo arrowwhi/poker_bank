@@ -2,6 +2,7 @@ package service
 
 import "errors"
 
+// Sentinel errors returned by service methods.
 var (
 	ErrNoActiveGame       = errors.New("no active game in this chat")
 	ErrGameAlreadyActive  = errors.New("game already active in this chat")

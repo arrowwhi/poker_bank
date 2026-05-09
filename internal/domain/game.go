@@ -2,14 +2,17 @@ package domain
 
 import "time"
 
+// GameStatus represents the lifecycle status of a game.
 type GameStatus string
 
+// GameStatusActive and related constants enumerate all possible game statuses.
 const (
 	GameStatusActive    GameStatus = "active"
 	GameStatusFinished  GameStatus = "finished"
 	GameStatusCancelled GameStatus = "cancelled"
 )
 
+// Game represents a single poker game session in a chat.
 type Game struct {
 	ID           int64
 	ChatID       int64

@@ -11,6 +11,7 @@ import (
 	"poker_bank/internal/interfaces"
 )
 
+// GameService coordinates game lifecycle, ledger operations, and result calculations.
 type GameService struct {
 	games        interfaces.GameRepository
 	ledger       interfaces.LedgerRepository
@@ -21,6 +22,7 @@ type GameService struct {
 	log          *zap.Logger
 }
 
+// NewGameService creates a GameService wired to the provided repository implementations.
 func NewGameService(
 	games interfaces.GameRepository,
 	ledger interfaces.LedgerRepository,
@@ -41,10 +43,12 @@ func NewGameService(
 	}
 }
 
+// NewGame creates a new game record and returns its generated ID.
 func (s *GameService) NewGame(ctx context.Context, g *domain.Game) (int64, error) {
 	return s.games.Create(ctx, g)
 }
 
+// GetActiveGame returns the active game for a chat, or ErrNoActiveGame if none exists.
 func (s *GameService) GetActiveGame(ctx context.Context, chatID int64) (*domain.Game, error) {
 	g, err := s.games.GetActiveByChat(ctx, chatID)
 	if err != nil {
@@ -84,14 +88,17 @@ func (s *GameService) Finish(ctx context.Context, gameID int64, bankDelta int) (
 	return settlements, nil
 }
 
+// GetGame retrieves a game by its primary key.
 func (s *GameService) GetGame(ctx context.Context, id int64) (*domain.Game, error) {
 	return s.games.GetByID(ctx, id)
 }
 
+// TransferDealer reassigns the dealer role to another player in the game.
 func (s *GameService) TransferDealer(ctx context.Context, gameID int64, newDealerTgID int64) error {
 	return s.games.UpdateDealer(ctx, gameID, newDealerTgID)
 }
 
+// Cancel marks a game as cancelled without computing results.
 func (s *GameService) Cancel(ctx context.Context, gameID int64) error {
 	return s.games.Cancel(ctx, gameID)
 }
@@ -173,38 +180,47 @@ func (s *GameService) UndoLast(ctx context.Context, gameID int64, n int) ([]doma
 	return voided, nil
 }
 
+// GetBank returns the current bank balance for a game.
 func (s *GameService) GetBank(ctx context.Context, gameID int64) (int, error) {
 	return s.ledger.GetBank(ctx, gameID)
 }
 
+// GetAllParticipants returns all participants (active and cashed-out) for a game.
 func (s *GameService) GetAllParticipants(ctx context.Context, gameID int64) ([]domain.Participant, error) {
 	return s.participants.ListByGame(ctx, gameID)
 }
 
+// GetParticipant returns the participation record for a specific player in a game.
 func (s *GameService) GetParticipant(ctx context.Context, gameID int64, playerTgID int64) (*domain.Participant, error) {
 	return s.participants.GetByPlayer(ctx, gameID, playerTgID)
 }
 
+// GetActiveParticipants returns only the currently active (not yet cashed-out) participants.
 func (s *GameService) GetActiveParticipants(ctx context.Context, gameID int64) ([]domain.Participant, error) {
 	return s.participants.ListActive(ctx, gameID)
 }
 
+// GetLedger returns all ledger entries for a game.
 func (s *GameService) GetLedger(ctx context.Context, gameID int64) ([]domain.LedgerEntry, error) {
 	return s.ledger.ListByGame(ctx, gameID)
 }
 
+// GetHistory returns the last n finished games for a chat.
 func (s *GameService) GetHistory(ctx context.Context, chatID int64, n int) ([]domain.Game, error) {
 	return s.games.ListFinishedByChat(ctx, chatID, n)
 }
 
+// GetResultsByGame returns per-player result records for a finished game.
 func (s *GameService) GetResultsByGame(ctx context.Context, gameID int64) ([]domain.GameResult, error) {
 	return s.results.ListByGame(ctx, gameID)
 }
 
+// GetLeaderboard returns aggregated stats for all players in a chat, ordered by net profit.
 func (s *GameService) GetLeaderboard(ctx context.Context, chatID int64) ([]domain.PlayerChatStats, error) {
 	return s.results.GetLeaderboard(ctx, chatID)
 }
 
+// GetPlayerStats returns all game results for a specific player within a chat.
 func (s *GameService) GetPlayerStats(ctx context.Context, playerTgID int64, chatID int64) ([]domain.GameResult, error) {
 	return s.results.ListByPlayer(ctx, playerTgID, chatID)
 }

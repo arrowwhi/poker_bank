@@ -8,6 +8,7 @@ import (
 	"poker_bank/internal/service"
 )
 
+// Handler holds the Telegram bot and all service dependencies used by command handlers.
 type Handler struct {
 	bot     *telebot.Bot
 	game    *service.GameService
@@ -17,6 +18,7 @@ type Handler struct {
 	log     *zap.Logger
 }
 
+// NewHandler creates a Handler wired up with the provided bot and services.
 func NewHandler(
 	bot *telebot.Bot,
 	game *service.GameService,

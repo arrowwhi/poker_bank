@@ -7,12 +7,14 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config holds application configuration loaded from environment variables.
 type Config struct {
 	TelegramToken string
 	DatabaseURL   string
 	LogLevel      string
 }
 
+// Load reads config from envFile (if non-empty) and then from environment variables.
 func Load(envFile string) (*Config, error) {
 	if envFile != "" {
 		if err := godotenv.Load(envFile); err != nil {

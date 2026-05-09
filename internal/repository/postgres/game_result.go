@@ -9,14 +9,17 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// GameResultRepo is a PostgreSQL implementation of GameResultRepository.
 type GameResultRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewGameResultRepo creates a new GameResultRepo.
 func NewGameResultRepo(db *pgxpool.Pool) *GameResultRepo {
 	return &GameResultRepo{db: db}
 }
 
+// InsertBulk inserts multiple game results in a loop.
 func (r *GameResultRepo) InsertBulk(ctx context.Context, results []domain.GameResult) error {
 	for _, res := range results {
 		_, err := r.db.Exec(ctx, `
@@ -34,10 +37,12 @@ func (r *GameResultRepo) InsertBulk(ctx context.Context, results []domain.GameRe
 	return nil
 }
 
+// ListByGame returns all results for the given game.
 func (r *GameResultRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.GameResult, error) {
 	return r.list(ctx, `WHERE game_id = $1`, gameID)
 }
 
+// GetLeaderboard returns aggregated player stats for the given chat.
 func (r *GameResultRepo) GetLeaderboard(ctx context.Context, chatID int64) ([]domain.PlayerChatStats, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT gr.player_tg_id,
@@ -65,6 +70,7 @@ func (r *GameResultRepo) GetLeaderboard(ctx context.Context, chatID int64) ([]do
 	return stats, rows.Err()
 }
 
+// ListByPlayer returns results for the given player in the given chat.
 func (r *GameResultRepo) ListByPlayer(ctx context.Context, playerTgID int64, chatID int64) ([]domain.GameResult, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT gr.game_id, gr.player_tg_id, gr.buy_in_count, gr.rebuy_count,

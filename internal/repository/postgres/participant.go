@@ -9,14 +9,17 @@ import (
 	"poker_bank/internal/domain"
 )
 
+// ParticipantRepo implements interfaces.ParticipantRepository using a PostgreSQL connection pool.
 type ParticipantRepo struct {
 	db *pgxpool.Pool
 }
 
+// NewParticipantRepo creates a new ParticipantRepo backed by the given connection pool.
 func NewParticipantRepo(db *pgxpool.Pool) *ParticipantRepo {
 	return &ParticipantRepo{db: db}
 }
 
+// Create inserts a new participant or updates the is_active flag if already present.
 func (r *ParticipantRepo) Create(ctx context.Context, p *domain.Participant) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO participants (game_id, player_tg_id, is_active)
@@ -29,6 +32,7 @@ func (r *ParticipantRepo) Create(ctx context.Context, p *domain.Participant) err
 	return nil
 }
 
+// GetByPlayer returns the participant record for a given game and player.
 func (r *ParticipantRepo) GetByPlayer(ctx context.Context, gameID int64, playerTgID int64) (*domain.Participant, error) {
 	p := &domain.Participant{}
 	err := r.db.QueryRow(ctx, `
@@ -41,10 +45,12 @@ func (r *ParticipantRepo) GetByPlayer(ctx context.Context, gameID int64, playerT
 	return p, nil
 }
 
+// ListByGame returns all participants (active and inactive) for a game.
 func (r *ParticipantRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.Participant, error) {
 	return r.list(ctx, gameID, false)
 }
 
+// ListActive returns only active participants for a game.
 func (r *ParticipantRepo) ListActive(ctx context.Context, gameID int64) ([]domain.Participant, error) {
 	return r.list(ctx, gameID, true)
 }
@@ -72,6 +78,7 @@ func (r *ParticipantRepo) list(ctx context.Context, gameID int64, onlyActive boo
 	return ps, rows.Err()
 }
 
+// SetActive updates the is_active flag for a participant.
 func (r *ParticipantRepo) SetActive(ctx context.Context, gameID int64, playerTgID int64, active bool) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE participants SET is_active = $1 WHERE game_id = $2 AND player_tg_id = $3`,

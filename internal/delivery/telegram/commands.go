@@ -722,7 +722,7 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 		if a == nil {
 			return fmt.Sprintf("• %s: нет данных\n", formatPlayerByID(player, tgID))
 		}
-		detail := fmt.Sprintf("1 buy-in")
+		detail := "1 buy-in"
 		if a.buyIns != 1 {
 			detail = fmt.Sprintf("%d buy-in", a.buyIns)
 		}
