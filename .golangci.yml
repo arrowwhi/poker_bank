@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   enable:
-    - revive        # замена golint
+    - revive
     - govet
     - errcheck
     - staticcheck
@@ -12,17 +12,17 @@ linters:
     - gofmt
     - goimports
     - misspell
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-      - name: var-naming
-        severity: warning
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+        - name: var-naming
+          severity: warning
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
