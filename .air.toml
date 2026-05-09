@@ -1,0 +1,18 @@
+[build]
+  cmd           = "go build -o ./tmp/bot ./cmd/poker-bank"
+  bin           = "./tmp/bot"
+  full_bin      = "./tmp/bot"
+  include_ext   = ["go"]
+  exclude_dir   = ["tmp", "vendor", "migrations"]
+  delay         = 500
+  kill_delay    = "500ms"
+  rerun_delay   = 500
+  log           = "air.log"
+
+[log]
+  time = true
+
+[color]
+  build  = "yellow"
+  runner = "green"
+  watcher = "cyan"
