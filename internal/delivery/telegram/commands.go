@@ -702,10 +702,10 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 
 	sb := strings.Builder{}
 	fmt.Fprintf(&sb, "🎮 Игра #%d\n", game.ID)
-	sb.WriteString(fmt.Sprintf("Дилер: %s\n", formatPlayerByID(dealer, game.DealerTgID)))
-	sb.WriteString(fmt.Sprintf("Курс: %s₽/фишку | Buy-in: %d₽ | Rebuy: %d₽\n",
-		formatRate(game.BuyInRub, game.BuyInChips), game.BuyInRub, game.RebuyRub))
-	sb.WriteString(fmt.Sprintf("💰 Банк: %d₽\n", bank))
+	fmt.Fprintf(&sb, "Дилер: %s\n", formatPlayerByID(dealer, game.DealerTgID))
+	fmt.Fprintf(&sb, "Курс: %s₽/фишку | Buy-in: %d₽ | Rebuy: %d₽\n",
+		formatRate(game.BuyInRub, game.BuyInChips), game.BuyInRub, game.RebuyRub)
+	fmt.Fprintf(&sb, "💰 Банк: %d₽\n", bank)
 
 	var active, out []domain.Participant
 	for _, p := range participants {
@@ -734,25 +734,25 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 	}
 
 	if len(active) > 0 {
-		sb.WriteString(fmt.Sprintf("\n🟢 В игре (%d):\n", len(active)))
+		fmt.Fprintf(&sb, "\n🟢 В игре (%d):\n", len(active))
 		for _, p := range active {
 			sb.WriteString(formatParticipantLine(p.PlayerTgID))
 		}
 	}
 
 	if len(out) > 0 {
-		sb.WriteString(fmt.Sprintf("\n⬛ Вышли (%d):\n", len(out)))
+		fmt.Fprintf(&sb, "\n⬛ Вышли (%d):\n", len(out))
 		for _, p := range out {
 			sb.WriteString(formatParticipantLine(p.PlayerTgID))
 		}
 	}
 
 	if len(pendingList) > 0 {
-		sb.WriteString(fmt.Sprintf("\n⏳ Ожидают подтверждения (%d):\n", len(pendingList)))
+		fmt.Fprintf(&sb, "\n⏳ Ожидают подтверждения (%d):\n", len(pendingList))
 		for _, pa := range pendingList {
 			player, _ := h.player.GetByID(ctx, pa.TargetTgID)
-			sb.WriteString(fmt.Sprintf("• %s — %s\n",
-				formatPlayerByID(player, pa.TargetTgID), pa.ActionType))
+			fmt.Fprintf(&sb, "• %s — %s\n",
+				formatPlayerByID(player, pa.TargetTgID), pa.ActionType)
 		}
 	}
 
@@ -816,17 +816,17 @@ func (h *Handler) handleMe(c telebot.Context) error {
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("👤 Ваши показатели в игре #%d:\n", game.ID))
-	sb.WriteString(fmt.Sprintf("Статус: %s\n", status))
-	sb.WriteString(fmt.Sprintf("Buy-in: %d × %d₽ = %d₽\n", buyInCount, game.BuyInRub, buyInCount*game.BuyInRub))
+	fmt.Fprintf(&sb, "👤 Ваши показатели в игре #%d:\n", game.ID)
+	fmt.Fprintf(&sb, "Статус: %s\n", status)
+	fmt.Fprintf(&sb, "Buy-in: %d × %d₽ = %d₽\n", buyInCount, game.BuyInRub, buyInCount*game.BuyInRub)
 	if rebuyCount > 0 {
-		sb.WriteString(fmt.Sprintf("Rebuy: %d × %d₽ = %d₽\n", rebuyCount, game.RebuyRub, rebuyCount*game.RebuyRub))
+		fmt.Fprintf(&sb, "Rebuy: %d × %d₽ = %d₽\n", rebuyCount, game.RebuyRub, rebuyCount*game.RebuyRub)
 	}
-	sb.WriteString(fmt.Sprintf("Вложено: %d₽\n", totalInRub))
+	fmt.Fprintf(&sb, "Вложено: %d₽\n", totalInRub)
 	if totalOutRub > 0 {
-		sb.WriteString(fmt.Sprintf("Вышел: %d фишек = %d₽\n", totalOutChips, totalOutRub))
+		fmt.Fprintf(&sb, "Вышел: %d фишек = %d₽\n", totalOutChips, totalOutRub)
 	}
-	sb.WriteString(fmt.Sprintf("Баланс: %+d₽\n", totalOutRub-totalInRub))
+	fmt.Fprintf(&sb, "Баланс: %+d₽\n", totalOutRub-totalInRub)
 
 	return c.Reply(sb.String())
 }
@@ -850,7 +850,7 @@ func (h *Handler) handleHistory(c telebot.Context) error {
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("📜 История игр (последние %d):\n", len(games)))
+	fmt.Fprintf(&sb, "📜 История игр (последние %d):\n", len(games))
 
 	for _, g := range games {
 		results, _ := h.game.GetResultsByGame(ctx, g.ID)
@@ -859,7 +859,7 @@ func (h *Handler) handleHistory(c telebot.Context) error {
 		if g.EndedAt != nil {
 			date = g.EndedAt.Format("02.01.2006")
 		}
-		sb.WriteString(fmt.Sprintf("\n#%d — %s | %d игроков\n", g.ID, date, len(results)))
+		fmt.Fprintf(&sb, "\n#%d — %s | %d игроков\n", g.ID, date, len(results))
 
 		var winner, loser *domain.GameResult
 		for i := range results {
@@ -873,11 +873,11 @@ func (h *Handler) handleHistory(c telebot.Context) error {
 		}
 		if winner != nil {
 			wp, _ := h.player.GetByID(ctx, winner.PlayerTgID)
-			sb.WriteString(fmt.Sprintf("🏆 %s %+d₽", formatPlayerByID(wp, winner.PlayerTgID), winner.NetRub))
+			fmt.Fprintf(&sb, "🏆 %s %+d₽", formatPlayerByID(wp, winner.PlayerTgID), winner.NetRub)
 		}
 		if loser != nil && loser.PlayerTgID != winner.PlayerTgID {
 			lp, _ := h.player.GetByID(ctx, loser.PlayerTgID)
-			sb.WriteString(fmt.Sprintf(" | 💸 %s %+d₽", formatPlayerByID(lp, loser.PlayerTgID), loser.NetRub))
+			fmt.Fprintf(&sb, " | 💸 %s %+d₽", formatPlayerByID(lp, loser.PlayerTgID), loser.NetRub)
 		}
 		sb.WriteByte('\n')
 	}
