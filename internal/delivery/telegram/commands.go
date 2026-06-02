@@ -509,9 +509,9 @@ func (h *Handler) handleCashOut(c telebot.Context) error {
 		return c.Reply("Использование: /cashout <chips>")
 	}
 
-	chips, err := parsePositiveInt(args[0])
+	chips, err := parseNonNegativeInt(args[0])
 	if err != nil {
-		return c.Reply("❌ Количество фишек должно быть положительным целым числом.")
+		return c.Reply("❌ Количество фишек должно быть целым числом (0 или больше).")
 	}
 
 	amountRub, ok := game.ChipsToRub(chips)
@@ -567,9 +567,9 @@ func (h *Handler) handleDealerCashOut(c telebot.Context) error {
 	}
 
 	username := strings.TrimPrefix(args[0], "@")
-	chips, err := parsePositiveInt(args[1])
+	chips, err := parseNonNegativeInt(args[1])
 	if err != nil {
-		return c.Reply("❌ Количество фишек должно быть положительным целым числом.")
+		return c.Reply("❌ Количество фишек должно быть целым числом (0 или больше).")
 	}
 
 	target, err := h.player.GetByUsername(ctx, username)
@@ -1357,6 +1357,14 @@ func parsePositiveInt(s string) (int, error) {
 	v, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil || v <= 0 {
 		return 0, fmt.Errorf("не положительное целое")
+	}
+	return v, nil
+}
+
+func parseNonNegativeInt(s string) (int, error) {
+	v, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("не неотрицательное целое")
 	}
 	return v, nil
 }
