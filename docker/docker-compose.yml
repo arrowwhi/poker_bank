@@ -17,9 +17,7 @@ services:
       retries: 10
 
   migrate:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.migrate
+    image: ghcr.io/pressly/goose:latest
     depends_on:
       postgres:
         condition: service_healthy

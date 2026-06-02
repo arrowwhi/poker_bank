@@ -5,7 +5,7 @@ COMPOSE := docker compose -f docker/docker-compose.yml
 # ─── Dev ────────────────────────────────────────────────────────────────────
 
 dev: ## Запустить бота с hot-reload (air) + postgres
-	$(COMPOSE) --profile dev up --build
+	$(COMPOSE) --profile dev up --build -d
 
 prod: ## Запустить бота из собранного образа + postgres
 	$(COMPOSE) --profile prod up --build
