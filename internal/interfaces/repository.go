@@ -58,6 +58,7 @@ type PendingActionRepository interface {
 	GetPending(ctx context.Context, gameID int64, targetTgID int64, actionType domain.ActionType) (*domain.PendingAction, error)
 	ListPendingByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error)
 	Resolve(ctx context.Context, id int64, status domain.PendingStatus, resolvedByTgID int64) (*domain.PendingAction, error)
+	CancelByPlayer(ctx context.Context, gameID int64, playerTgID int64) ([]domain.PendingAction, error)
 	ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 

@@ -137,11 +137,13 @@ func (s *GameService) Rebuy(ctx context.Context, game *domain.Game, playerTgID i
 	return err
 }
 
-// CashOut records a CASH_OUT ledger entry and deactivates the participant.
-func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID int64, chips int, dealerTgID int64) error {
+// CashOut records a CASH_OUT ledger entry, deactivates the participant and cancels
+// any pending actions for the player (e.g. an outstanding REBUY request).
+// Returns cancelled pending actions so the caller can edit those Telegram messages.
+func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID int64, chips int, dealerTgID int64) ([]domain.PendingAction, error) {
 	amountRub, ok := game.ChipsToRub(chips)
 	if !ok {
-		return ErrInvalidChipsAmount
+		return nil, ErrInvalidChipsAmount
 	}
 
 	entry := &domain.LedgerEntry{
@@ -153,9 +155,16 @@ func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID
 		CreatedByTgID: dealerTgID,
 	}
 	if _, err := s.ledger.Create(ctx, entry); err != nil {
-		return err
+		return nil, err
 	}
-	return s.participants.SetActive(ctx, game.ID, playerTgID, false)
+	if err := s.participants.SetActive(ctx, game.ID, playerTgID, false); err != nil {
+		return nil, err
+	}
+	cancelled, err := s.pending.CancelByPlayer(ctx, game.ID, playerTgID)
+	if err != nil {
+		s.log.Warn("cancel pending actions on cashout", zap.Error(err))
+	}
+	return cancelled, nil
 }
 
 // UndoLast аннулирует последние N записей леджера и восстанавливает статусы участников.

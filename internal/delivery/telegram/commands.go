@@ -1040,9 +1040,11 @@ func (h *Handler) handlePendingCallback(c telebot.Context, parts []string) error
 			}
 		case domain.ActionCashOut:
 			chips := int(resolved.Payload["chips"].(float64))
-			if err := h.game.CashOut(ctx, game, resolved.TargetTgID, chips, senderID); err != nil {
+			cancelled, err := h.game.CashOut(ctx, game, resolved.TargetTgID, chips, senderID)
+			if err != nil {
 				h.log.Error("cashout после подтверждения", zap.Error(err))
 			}
+			h.editCancelledPending(cancelled)
 		}
 	}
 
@@ -1149,10 +1151,12 @@ func (h *Handler) handleDealerCashOutCallback(c telebot.Context, parts []string)
 		return c.Respond()
 	}
 
-	if err := h.game.CashOut(ctx, game, targetID, chips, c.Sender().ID); err != nil {
+	cancelled, err := h.game.CashOut(ctx, game, targetID, chips, c.Sender().ID)
+	if err != nil {
 		h.log.Error("dealer cashout callback", zap.Error(err))
 		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка выполнения."})
 	}
+	h.editCancelledPending(cancelled)
 
 	amountRub, _ := game.ChipsToRub(chips)
 	target, _ := h.player.GetByID(ctx, targetID)
@@ -1348,8 +1352,22 @@ func pendingResolvedText(pa *domain.PendingAction) string {
 		return fmt.Sprintf("❌ %s отклонён.", action)
 	case domain.PendingStatusExpired:
 		return fmt.Sprintf("⏰ %s истёк.", action)
+	case domain.PendingStatusCancelled:
+		return fmt.Sprintf("🚫 %s отменён (игрок вышел).", action)
 	default:
 		return fmt.Sprintf("%s [%s].", action, pa.Status)
+	}
+}
+
+// editCancelledPending редактирует Telegram-сообщения для отменённых pending-действий,
+// убирая инлайн-клавиатуру и добавляя пометку об отмене.
+func (h *Handler) editCancelledPending(cancelled []domain.PendingAction) {
+	for _, pa := range cancelled {
+		if pa.MessageID == nil {
+			continue
+		}
+		msg := &telebot.Message{ID: int(*pa.MessageID), Chat: &telebot.Chat{ID: pa.ChatID}}
+		_, _ = h.bot.Edit(msg, pendingResolvedText(&pa), telebot.ModeDefault)
 	}
 }
 

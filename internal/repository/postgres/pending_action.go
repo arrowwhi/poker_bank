@@ -119,6 +119,34 @@ func (r *PendingActionRepo) Resolve(ctx context.Context, id int64, status domain
 	return a, nil
 }
 
+// CancelByPlayer cancels all pending actions for a player in a game and returns them.
+func (r *PendingActionRepo) CancelByPlayer(ctx context.Context, gameID int64, playerTgID int64) ([]domain.PendingAction, error) {
+	rows, err := r.db.Query(ctx, `
+		UPDATE pending_actions
+		SET status = 'cancelled', resolved_at = now()
+		WHERE game_id = $1 AND target_tg_id = $2 AND status = 'pending'
+		RETURNING id, game_id, action_type, requester_tg_id, target_tg_id, payload,
+		          status, chat_id, message_id, created_at, resolved_at, resolved_by_tg_id
+	`, gameID, playerTgID)
+	if err != nil {
+		return nil, fmt.Errorf("cancel pending actions by player: %w", err)
+	}
+	defer rows.Close()
+
+	var result []domain.PendingAction
+	for rows.Next() {
+		var a domain.PendingAction
+		if err := rows.Scan(
+			&a.ID, &a.GameID, &a.ActionType, &a.RequesterTgID, &a.TargetTgID, &a.Payload,
+			&a.Status, &a.ChatID, &a.MessageID, &a.CreatedAt, &a.ResolvedAt, &a.ResolvedByTgID,
+		); err != nil {
+			return nil, fmt.Errorf("scan cancelled pending action: %w", err)
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
 // ExpireOlderThan marks all still-pending actions older than olderThan as expired and returns the count.
 func (r *PendingActionRepo) ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error) {
 	tag, err := r.db.Exec(ctx, `
