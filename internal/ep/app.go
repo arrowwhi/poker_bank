@@ -47,6 +47,7 @@ func Run() error {
 	resultRepo := postgres.NewGameResultRepo(pool)
 	settlementRepo := postgres.NewSettlementRepo(pool)
 	fsmRepo := postgres.NewFSMStateRepo(pool)
+	chatTopicRepo := postgres.NewChatTopicRepo(pool)
 
 	// Services
 	playerSvc := service.NewPlayerService(playerRepo, log)
@@ -65,7 +66,7 @@ func Run() error {
 		return fmt.Errorf("create bot: %w", err)
 	}
 
-	h := telegram.NewHandler(bot, gameSvc, playerSvc, pendingSvc, fsmRepo, log)
+	h := telegram.NewHandler(bot, gameSvc, playerSvc, pendingSvc, fsmRepo, chatTopicRepo, log)
 	h.Register(bot)
 
 	// Background job: expire pending actions older than 30 minutes

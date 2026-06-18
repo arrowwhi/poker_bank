@@ -1,4 +1,4 @@
-.PHONY: dev prod build migrate migrate-down migrate-status db stop logs lint test
+.PHONY: dev prod build topicfinder migrate migrate-down migrate-status db stop logs lint test
 
 COMPOSE := docker compose -f docker/docker-compose.yml
 
@@ -12,6 +12,9 @@ prod: ## Запустить бота из собранного образа + po
 
 build: ## Собрать бинарник локально
 	go build -o ./tmp/bot ./cmd/poker-bank
+
+topicfinder: ## Запустить утилиту поиска ID топика (останови основного бота!)
+	go run ./cmd/topicfinder
 
 GOOSE_DBSTRING ?= host=localhost port=5432 dbname=poker_bank user=poker password=poker sslmode=disable
 

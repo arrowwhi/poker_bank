@@ -346,7 +346,7 @@ func (h *Handler) handleJoin(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.bot.Send(c.Chat(), fmt.Sprintf(
+	_, err = h.sendToChat(c, fmt.Sprintf(
 		"🃏 %s просит JOIN (buy-in: %d₽ → %d фишек). Подтвердить?",
 		playerName(c.Sender(), senderID), game.BuyInRub, game.BuyInChips,
 	), markup)
@@ -393,7 +393,7 @@ func (h *Handler) handleRebuy(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.bot.Send(c.Chat(), fmt.Sprintf(
+	_, err = h.sendToChat(c, fmt.Sprintf(
 		"🃏 %s просит REBUY (%d₽ → %d фишек). Подтвердить?",
 		playerName(c.Sender(), senderID), game.RebuyRub, game.RebuyChips,
 	), markup)
@@ -541,7 +541,7 @@ func (h *Handler) handleCashOut(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.bot.Send(c.Chat(), fmt.Sprintf(
+	_, err = h.sendToChat(c, fmt.Sprintf(
 		"💸 %s хочет выйти: %d фишек = %d₽. Подтвердить?",
 		playerName(c.Sender(), senderID), chips, amountRub,
 	), markup)

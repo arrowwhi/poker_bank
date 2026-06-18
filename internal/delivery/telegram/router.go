@@ -5,9 +5,14 @@ import "gopkg.in/telebot.v3"
 // Register attaches all bot middleware and command handlers to the given bot instance.
 func (h *Handler) Register(b *telebot.Bot) {
 	b.Use(h.UpsertPlayer)
+	b.Use(h.TopicGuard)
 
 	b.Handle("/start", h.handleStart)
 	b.Handle("/help", h.handleHelp)
+
+	// Topic binding (chat admins only)
+	b.Handle("/set_topic", h.handleSetTopic)
+	b.Handle("/unset_topic", h.handleUnsetTopic)
 
 	// Game lifecycle
 	b.Handle("/newgame", h.handleNewGame)

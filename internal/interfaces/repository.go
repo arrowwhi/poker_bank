@@ -77,6 +77,13 @@ type SettlementRepository interface {
 	MarkPaid(ctx context.Context, id int64) error
 }
 
+// ChatTopicRepository defines persistence operations for chat-to-topic bindings.
+type ChatTopicRepository interface {
+	Get(ctx context.Context, chatID int64) (*domain.ChatTopic, error)
+	Set(ctx context.Context, chatID int64, topicID int64, setByTgID int64) error
+	Delete(ctx context.Context, chatID int64) error
+}
+
 // FSMStateRepository defines persistence operations for FSM states.
 type FSMStateRepository interface {
 	Get(ctx context.Context, chatID int64, userTgID int64) (*domain.FSMState, error)
