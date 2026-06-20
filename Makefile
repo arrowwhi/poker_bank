@@ -16,13 +16,11 @@ build: ## Собрать бинарник локально
 topicfinder: ## Запустить утилиту поиска ID топика (останови основного бота!)
 	go run ./cmd/topicfinder
 
-GOOSE_DBSTRING ?= host=localhost port=5432 dbname=poker_bank user=poker password=poker sslmode=disable
-
-migrate: ## Применить все миграции
-	goose -dir ./migrations postgres "$(GOOSE_DBSTRING)" up
+migrate: ## Применить все миграции через контейнер
+	$(COMPOSE) run --rm migrate up
 
 migrate-down: ## Откатить последнюю миграцию
-	goose -dir ./migrations postgres "$(GOOSE_DBSTRING)" down
+	$(COMPOSE) run --rm migrate down
 
 lint: ## Запустить golangci-lint
 	golangci-lint run ./...
