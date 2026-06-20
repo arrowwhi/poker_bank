@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 )
@@ -26,7 +27,11 @@ func NewClient(ctx context.Context, credentialsFile, spreadsheetID string) (*Cli
 	if err != nil {
 		return nil, fmt.Errorf("read credentials file: %w", err)
 	}
-	svc, err := sheets.NewService(ctx, option.WithCredentialsJSON(credentialsJSON))
+	creds, err := google.CredentialsFromJSONWithType(ctx, credentialsJSON, google.ServiceAccount, sheets.SpreadsheetsScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse credentials: %w", err)
+	}
+	svc, err := sheets.NewService(ctx, option.WithCredentials(creds))
 	if err != nil {
 		return nil, fmt.Errorf("create sheets service: %w", err)
 	}
