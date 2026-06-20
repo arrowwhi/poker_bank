@@ -90,3 +90,12 @@ type FSMStateRepository interface {
 	Set(ctx context.Context, state *domain.FSMState) error
 	Delete(ctx context.Context, chatID int64, userTgID int64) error
 }
+
+// SheetsExporter duplicates a game's progress into an external spreadsheet.
+type SheetsExporter interface {
+	// CreateGameSheet creates a new sheet for the game and writes its initial state.
+	CreateGameSheet(ctx context.Context, gameID int64) error
+	// SyncGame recomputes the game's current state from the ledger and rewrites
+	// the existing sheet created by CreateGameSheet.
+	SyncGame(ctx context.Context, gameID int64) error
+}

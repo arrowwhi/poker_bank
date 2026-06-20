@@ -19,6 +19,7 @@ type GameService struct {
 	results      interfaces.GameResultRepository
 	settlements  interfaces.SettlementRepository
 	pending      interfaces.PendingActionRepository
+	exporter     interfaces.SheetsExporter
 	log          *zap.Logger
 }
 
@@ -30,6 +31,7 @@ func NewGameService(
 	results interfaces.GameResultRepository,
 	settlements interfaces.SettlementRepository,
 	pending interfaces.PendingActionRepository,
+	exporter interfaces.SheetsExporter,
 	log *zap.Logger,
 ) *GameService {
 	return &GameService{
@@ -39,13 +41,32 @@ func NewGameService(
 		results:      results,
 		settlements:  settlements,
 		pending:      pending,
+		exporter:     exporter,
 		log:          log,
 	}
 }
 
 // NewGame creates a new game record and returns its generated ID.
 func (s *GameService) NewGame(ctx context.Context, g *domain.Game) (int64, error) {
-	return s.games.Create(ctx, g)
+	id, err := s.games.Create(ctx, g)
+	if err != nil {
+		return 0, err
+	}
+	go func() {
+		if err := s.exporter.CreateGameSheet(context.Background(), id); err != nil {
+			s.log.Error("создание листа Google Sheets", zap.Int64("game_id", id), zap.Error(err))
+		}
+	}()
+	return id, nil
+}
+
+// syncSheetAsync пересчитывает и перезаписывает лист Google Sheets в фоне; ошибка не блокирует вызывающего.
+func (s *GameService) syncSheetAsync(gameID int64) {
+	go func() {
+		if err := s.exporter.SyncGame(context.Background(), gameID); err != nil {
+			s.log.Error("синхронизация листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
+		}
+	}()
 }
 
 // GetActiveGame returns the active game for a chat, or ErrNoActiveGame if none exists.
@@ -85,6 +106,9 @@ func (s *GameService) Finish(ctx context.Context, gameID int64, bankDelta int) (
 	}); err != nil {
 		return nil, err
 	}
+
+	s.syncSheetAsync(gameID)
+
 	return settlements, nil
 }
 
@@ -116,11 +140,15 @@ func (s *GameService) BuyIn(ctx context.Context, game *domain.Game, playerTgID i
 	if _, err := s.ledger.Create(ctx, entry); err != nil {
 		return err
 	}
-	return s.participants.Create(ctx, &domain.Participant{
+	if err := s.participants.Create(ctx, &domain.Participant{
 		GameID:     game.ID,
 		PlayerTgID: playerTgID,
 		IsActive:   true,
-	})
+	}); err != nil {
+		return err
+	}
+	s.syncSheetAsync(game.ID)
+	return nil
 }
 
 // Rebuy records a REBUY ledger entry.
@@ -133,8 +161,11 @@ func (s *GameService) Rebuy(ctx context.Context, game *domain.Game, playerTgID i
 		AmountChips:   game.RebuyChips,
 		CreatedByTgID: createdByTgID,
 	}
-	_, err := s.ledger.Create(ctx, entry)
-	return err
+	if _, err := s.ledger.Create(ctx, entry); err != nil {
+		return err
+	}
+	s.syncSheetAsync(game.ID)
+	return nil
 }
 
 // CashOut records a CASH_OUT ledger entry, deactivates the participant and cancels
@@ -164,6 +195,7 @@ func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID
 	if err != nil {
 		s.log.Warn("cancel pending actions on cashout", zap.Error(err))
 	}
+	s.syncSheetAsync(game.ID)
 	return cancelled, nil
 }
 
@@ -186,6 +218,7 @@ func (s *GameService) UndoLast(ctx context.Context, gameID int64, n int) ([]doma
 			}
 		}
 	}
+	s.syncSheetAsync(gameID)
 	return voided, nil
 }
 

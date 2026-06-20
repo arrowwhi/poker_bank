@@ -12,6 +12,8 @@ import (
 
 	"poker_bank/internal/config"
 	"poker_bank/internal/delivery/telegram"
+	"poker_bank/internal/integrations/sheets"
+	"poker_bank/internal/interfaces"
 	"poker_bank/internal/repository/postgres"
 	"poker_bank/internal/service"
 )
@@ -51,9 +53,20 @@ func Run() error {
 
 	// Services
 	playerSvc := service.NewPlayerService(playerRepo, log)
+
+	var exporter interfaces.SheetsExporter = service.NewNoopSheetsExporter()
+	if cfg.SheetsEnabled() {
+		sheetsClient, err := sheets.NewClient(ctx, cfg.GoogleSheetsCredentialsFile, cfg.GoogleSheetsSpreadsheetID)
+		if err != nil {
+			log.Error("инициализация Google Sheets клиента", zap.Error(err))
+		} else {
+			exporter = service.NewGoogleSheetsExporter(sheetsClient, gameRepo, ledgerRepo, settlementRepo, playerRepo, log)
+		}
+	}
+
 	gameSvc := service.NewGameService(
 		gameRepo, ledgerRepo, participantRepo,
-		resultRepo, settlementRepo, pendingRepo, log,
+		resultRepo, settlementRepo, pendingRepo, exporter, log,
 	)
 	pendingSvc := service.NewPendingService(pendingRepo, log)
 

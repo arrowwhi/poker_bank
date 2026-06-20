@@ -3,6 +3,7 @@
   bin           = "./tmp/bot"
   full_bin      = "./tmp/bot"
   include_ext   = ["go"]
+  include_files = [".env"]
   exclude_dir   = ["tmp", "vendor", "migrations"]
   delay         = 500
   kill_delay    = "500ms"

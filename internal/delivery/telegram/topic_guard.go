@@ -60,13 +60,14 @@ func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
 		}
 
 		// Outside the bound topic: do not handle, but nudge users (throttled).
-		h.maybeSendTopicHint(chat, binding.TopicID)
+		h.maybeSendTopicHint(chat, msg)
 		return nil
 	}
 }
 
-// maybeSendTopicHint posts a hint into the bound topic at most once per hour per chat.
-func (h *Handler) maybeSendTopicHint(chat *telebot.Chat, topicID int64) {
+// maybeSendTopicHint replies to the offending message, in the same topic it was
+// posted in, at most once per hour per chat.
+func (h *Handler) maybeSendTopicHint(chat *telebot.Chat, msg *telebot.Message) {
 	h.hintMu.Lock()
 	last := h.lastHintAt[chat.ID]
 	now := time.Now()
@@ -79,7 +80,7 @@ func (h *Handler) maybeSendTopicHint(chat *telebot.Chat, topicID int64) {
 
 	_, err := h.bot.Send(chat,
 		"🃏 Я работаю только в выделенном топике этого чата. Пишите команды банкира туда.",
-		&telebot.SendOptions{ThreadID: int(topicID)},
+		&telebot.SendOptions{ThreadID: msg.ThreadID, ReplyTo: msg},
 	)
 	if err != nil {
 		h.log.Warn("send topic hint", zap.Error(err), zap.Int64("chat_id", chat.ID))
@@ -87,12 +88,29 @@ func (h *Handler) maybeSendTopicHint(chat *telebot.Chat, topicID int64) {
 }
 
 // sendToChat sends a message to the current chat, routing it into the bound
-// topic when TopicGuard has resolved one for this update.
+// topic when TopicGuard has resolved one for this update. Topic routing is
+// merged into the caller-supplied SendOptions/ReplyMarkup rather than
+// appended as a separate option, because telebot.extractOptions processes
+// options in order and a later *SendOptions overwrites ReplyMarkup set by an
+// earlier one — appending used to silently drop inline keyboards.
 func (h *Handler) sendToChat(c telebot.Context, what interface{}, opts ...interface{}) (*telebot.Message, error) {
-	if tid, ok := c.Get(ctxTopicID).(int); ok && tid != 0 {
-		opts = append(opts, &telebot.SendOptions{ThreadID: tid})
+	tid, hasTopic := c.Get(ctxTopicID).(int)
+	if !hasTopic || tid == 0 {
+		return h.bot.Send(c.Chat(), what, opts...)
 	}
-	return h.bot.Send(c.Chat(), what, opts...)
+
+	merged := &telebot.SendOptions{ThreadID: tid}
+	for _, opt := range opts {
+		switch v := opt.(type) {
+		case *telebot.ReplyMarkup:
+			merged.ReplyMarkup = v
+		case *telebot.SendOptions:
+			threadID := merged.ThreadID
+			merged = v
+			merged.ThreadID = threadID
+		}
+	}
+	return h.bot.Send(c.Chat(), what, merged)
 }
 
 // commandName extracts the leading "/command" token from message text,

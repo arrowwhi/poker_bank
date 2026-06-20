@@ -1,3 +1,5 @@
+name: poker_bank
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -43,6 +45,8 @@ services:
     env_file: ../.env
     environment:
       DATABASE_URL: "postgres://poker:poker@postgres:5432/poker_bank?sslmode=disable"
+    volumes:
+      - ../secrets:/app/secrets:ro
     profiles:
       - prod
 
@@ -52,6 +56,7 @@ services:
     volumes:
       - ..:/app
       - go_cache:/root/go/pkg/mod
+      - ../secrets:/app/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
