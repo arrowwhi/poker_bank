@@ -5,6 +5,7 @@ package sheets
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"google.golang.org/api/option"
@@ -21,7 +22,11 @@ type Client struct {
 
 // NewClient creates a Sheets API client authenticated via a service account JSON key file.
 func NewClient(ctx context.Context, credentialsFile, spreadsheetID string) (*Client, error) {
-	svc, err := sheets.NewService(ctx, option.WithCredentialsFile(credentialsFile))
+	credentialsJSON, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("read credentials file: %w", err)
+	}
+	svc, err := sheets.NewService(ctx, option.WithCredentialsJSON(credentialsJSON))
 	if err != nil {
 		return nil, fmt.Errorf("create sheets service: %w", err)
 	}
