@@ -24,6 +24,9 @@ type Handler struct {
 	// lastHintAt throttles the "wrong topic" hint to at most once per hour per chat.
 	hintMu     sync.Mutex
 	lastHintAt map[int64]time.Time
+
+	// botCommands is a set of all commands handled by this bot
+	botCommands map[string]bool
 }
 
 // NewHandler creates a Handler wired up with the provided bot and services.
@@ -45,5 +48,29 @@ func NewHandler(
 		chatTopic:  chatTopic,
 		log:        log,
 		lastHintAt: make(map[int64]time.Time),
+		botCommands: map[string]bool{
+			"/start":           true,
+			"/help":            true,
+			"/set_topic":       true,
+			"/unset_topic":     true,
+			"/newgame":         true,
+			"/endgame":         true,
+			"/endgame_force":   true,
+			"/cancel":          true,
+			"/admin_cancel":    true,
+			"/transfer_dealer": true,
+			"/join":            true,
+			"/rebuy":           true,
+			"/dealer_join":     true,
+			"/dealer_rebuy":    true,
+			"/dealer_cashout":  true,
+			"/cashout":         true,
+			"/undo":            true,
+			"/status":          true,
+			"/me":              true,
+			"/history":         true,
+			"/game":            true,
+			"/stats":           true,
+		},
 	}
 }

@@ -59,8 +59,11 @@ func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
 			return next(c)
 		}
 
-		// Outside the bound topic: do not handle, but nudge users (throttled).
-		h.maybeSendTopicHint(chat, msg)
+		// Outside the bound topic: do not handle, but nudge users only if it's a known command (throttled).
+		cmd := commandName(msg.Text)
+		if cmd != "" && h.botCommands[cmd] {
+			h.maybeSendTopicHint(chat, msg)
+		}
 		return nil
 	}
 }
