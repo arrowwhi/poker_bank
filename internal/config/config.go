@@ -21,20 +21,29 @@ func (c *Config) SheetsEnabled() bool {
 	return c.GoogleSheetsSpreadsheetID != "" && c.GoogleSheetsCredentialsFile != ""
 }
 
-// Load reads config from envFile (if non-empty) and then from environment variables.
+// Load reads config from environment variables, falling back to envFile for
+// any variable not already set in the environment. envFile is optional: if it
+// doesn't exist or fails to parse, that error is ignored and only real
+// environment variables are used.
 func Load(envFile string) (*Config, error) {
+	var fileVars map[string]string
 	if envFile != "" {
-		if err := godotenv.Load(envFile); err != nil {
-			return nil, fmt.Errorf("load env file: %w", err)
+		fileVars, _ = godotenv.Read(envFile)
+	}
+
+	getenv := func(key string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
 		}
+		return fileVars[key]
 	}
 
 	cfg := &Config{
-		TelegramToken:               os.Getenv("TELEGRAM_TOKEN"),
-		DatabaseURL:                 os.Getenv("DATABASE_URL"),
-		LogLevel:                    os.Getenv("LOG_LEVEL"),
-		GoogleSheetsSpreadsheetID:   os.Getenv("GOOGLE_SHEETS_SPREADSHEET_ID"),
-		GoogleSheetsCredentialsFile: os.Getenv("GOOGLE_SHEETS_CREDENTIALS_FILE"),
+		TelegramToken:               getenv("TELEGRAM_TOKEN"),
+		DatabaseURL:                 getenv("DATABASE_URL"),
+		LogLevel:                    getenv("LOG_LEVEL"),
+		GoogleSheetsSpreadsheetID:   getenv("GOOGLE_SHEETS_SPREADSHEET_ID"),
+		GoogleSheetsCredentialsFile: getenv("GOOGLE_SHEETS_CREDENTIALS_FILE"),
 	}
 
 	if cfg.TelegramToken == "" {
