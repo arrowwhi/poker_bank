@@ -53,10 +53,27 @@ func ComputeGameResults(gameID int64, entries []domain.LedgerEntry) []domain.Gam
 	return results
 }
 
-// ApplyBankDelta корректирует net_rub игроков на величину расхождения банка.
-// delta > 0: банк в плюсе — кредиторы получают меньше пропорционально.
-// delta < 0: банк в минусе — должники платят больше пропорционально.
-// Остаток от округления достаётся крупнейшему кредитору/должнику.
+// ApplyBankDelta корректирует net_rub игроков на величину расхождения банка так,
+// чтобы сумма скорректированных NetRub стала равна нулю, никого не заставляя
+// платить или получать больше расчётного значения — корректировка всегда
+// уменьшает величину (модуль) и применяется только к «большей» стороне.
+//
+// delta = bank(game_id) = SUM(buy_in_rub + rebuy_rub) - SUM(cash_out_rub) по
+// неаннулированным записям леджера. Всегда верно: X - Y == delta, где
+// X = сумма |NetRub| у должников, Y = сумма NetRub у кредиторов.
+//
+// delta > 0 (выдано фишек больше, чем возвращено): долг (X) больше выигрыша (Y).
+//
+//	Кредиторы получают ровно то, что выиграли (NetRub не меняется).
+//	Долг должников пропорционально УМЕНЬШАЕТСЯ, пока X не сравняется с Y.
+//
+// delta < 0 (возвращено фишек больше, чем выдано): выигрыш (Y) больше долга (X).
+//
+//	Должники платят ровно то, что проиграли (NetRub не меняется).
+//	Выигрыш кредиторов пропорционально УМЕНЬШАЕТСЯ, пока Y не сравняется с X.
+//
+// Остаток от целочисленного деления достаётся записи с наибольшим по модулю
+// NetRub на скорректированной стороне.
 func ApplyBankDelta(results []domain.GameResult, delta int) []domain.GameResult {
 	if delta == 0 {
 		return results
@@ -65,33 +82,7 @@ func ApplyBankDelta(results []domain.GameResult, delta int) []domain.GameResult 
 	copy(adj, results)
 
 	if delta > 0 {
-		// Уменьшаем net кредиторов
-		total := 0
-		for _, r := range adj {
-			if r.NetRub > 0 {
-				total += r.NetRub
-			}
-		}
-		if total == 0 {
-			return adj
-		}
-		distributed, maxIdx := 0, -1
-		for i := range adj {
-			if adj[i].NetRub > 0 {
-				cut := delta * adj[i].NetRub / total
-				adj[i].NetRub -= cut
-				distributed += cut
-				if maxIdx == -1 || adj[i].NetRub > adj[maxIdx].NetRub {
-					maxIdx = i
-				}
-			}
-		}
-		if rem := delta - distributed; rem != 0 && maxIdx >= 0 {
-			adj[maxIdx].NetRub -= rem
-		}
-	} else {
-		// Увеличиваем долг должников
-		absDelta := -delta
+		// Долг больше выигрыша — уменьшаем долг должников.
 		total := 0
 		for _, r := range adj {
 			if r.NetRub < 0 {
@@ -104,10 +95,36 @@ func ApplyBankDelta(results []domain.GameResult, delta int) []domain.GameResult 
 		distributed, maxIdx := 0, -1
 		for i := range adj {
 			if adj[i].NetRub < 0 {
-				add := absDelta * (-adj[i].NetRub) / total
-				adj[i].NetRub -= add
-				distributed += add
+				cut := delta * (-adj[i].NetRub) / total
+				adj[i].NetRub += cut // долг уменьшается (к нулю)
+				distributed += cut
 				if maxIdx == -1 || (-adj[i].NetRub) > (-adj[maxIdx].NetRub) {
+					maxIdx = i
+				}
+			}
+		}
+		if rem := delta - distributed; rem != 0 && maxIdx >= 0 {
+			adj[maxIdx].NetRub += rem
+		}
+	} else {
+		// Выигрыш больше долга — уменьшаем выигрыш кредиторов.
+		absDelta := -delta
+		total := 0
+		for _, r := range adj {
+			if r.NetRub > 0 {
+				total += r.NetRub
+			}
+		}
+		if total == 0 {
+			return adj
+		}
+		distributed, maxIdx := 0, -1
+		for i := range adj {
+			if adj[i].NetRub > 0 {
+				cut := absDelta * adj[i].NetRub / total
+				adj[i].NetRub -= cut // выигрыш уменьшается (к нулю)
+				distributed += cut
+				if maxIdx == -1 || adj[i].NetRub > adj[maxIdx].NetRub {
 					maxIdx = i
 				}
 			}
