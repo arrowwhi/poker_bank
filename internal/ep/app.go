@@ -19,18 +19,7 @@ import (
 )
 
 // Run starts the bot application and blocks until an OS signal is received.
-func Run() error {
-	cfg, err := config.Load(".env")
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	log, err := buildLogger(cfg.LogLevel)
-	if err != nil {
-		return fmt.Errorf("build logger: %w", err)
-	}
-	defer log.Sync() //nolint:errcheck
-
+func Run(cfg *config.Config, log *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -104,13 +93,4 @@ func Run() error {
 	bot.Stop()
 
 	return nil
-}
-
-func buildLogger(level string) (*zap.Logger, error) {
-	switch level {
-	case "debug":
-		return zap.NewDevelopment()
-	default:
-		return zap.NewProduction()
-	}
 }
