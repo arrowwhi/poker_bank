@@ -50,4 +50,4 @@ jobs:
         run: |
           curl --fail -X GET \
             -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
-            "http://45.129.142.211:8000/api/v1/deploy?uuid=srzwtmdac8n294y4uggyuqac&force=false"
+            "http://45.129.142.96:8000/api/v1/deploy?uuid=ktny51ybdi8veuikvnofbmnj&force=false"
