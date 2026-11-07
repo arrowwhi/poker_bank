@@ -48,6 +48,6 @@ jobs:
     steps:
       - name: Trigger Coolify deploy
         run: |
-          curl --fail -X GET \
+          curl --fail -X POST \
             -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
             "http://45.129.142.96:8000/api/v1/deploy?uuid=ktny51ybdi8veuikvnofbmnj&force=false"
