@@ -1,17 +1,13 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"log"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
 
+	"poker_bank/internal/app"
 	"poker_bank/internal/config"
-	"poker_bank/internal/ep"
-	"poker_bank/migrations"
 )
 
 func main() {
@@ -26,11 +22,7 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	if err := runMigrations(cfg.DatabaseURL); err != nil {
-		logger.Fatal("run migrations", zap.Error(err))
-	}
-
-	if err := ep.Run(cfg, logger); err != nil {
+	if err := app.Run(context.Background(), cfg, logger); err != nil {
 		logger.Fatal("run app", zap.Error(err))
 	}
 }
@@ -42,25 +34,4 @@ func buildLogger(level string) (*zap.Logger, error) {
 	default:
 		return zap.NewProduction()
 	}
-}
-
-// runMigrations applies pending goose migrations embedded in the migrations package.
-func runMigrations(databaseURL string) error {
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		return fmt.Errorf("open db: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	goose.SetBaseFS(migrations.FS)
-
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("set dialect: %w", err)
-	}
-
-	if err := goose.Up(db, "."); err != nil {
-		return fmt.Errorf("goose up: %w", err)
-	}
-
-	return nil
 }

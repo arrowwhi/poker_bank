@@ -21,6 +21,7 @@ type GameRepository interface {
 	GetByID(ctx context.Context, id int64) (*domain.Game, error)
 	GetActiveByChat(ctx context.Context, chatID int64) (*domain.Game, error)
 	ListFinishedByChat(ctx context.Context, chatID int64, limit int) ([]domain.Game, error)
+	ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain.Game, error)
 	UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error
 	Finish(ctx context.Context, params FinishGameParams) error
 	Cancel(ctx context.Context, id int64) error

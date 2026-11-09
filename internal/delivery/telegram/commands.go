@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	tg "github.com/arrowwhi/infrastructure/telegram"
 	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/service"
@@ -25,7 +25,7 @@ const (
 // handleNewGame создаёт новую игру.
 // Синтаксис: /newgame [buy_in_rub buy_in_chips rebuy_rub rebuy_chips]
 // Если параметры не указаны — запускает пошаговый ввод через FSM.
-func (h *Handler) handleNewGame(c telebot.Context) error {
+func (h *Handler) handleNewGame(c *Context) error {
 	ctx := context.Background()
 	chatID := c.Chat().ID
 
@@ -50,7 +50,7 @@ func (h *Handler) handleNewGame(c telebot.Context) error {
 }
 
 // newGameStartFSM запускает пошаговый ввод параметров игры.
-func (h *Handler) newGameStartFSM(c telebot.Context, ctx context.Context, chatID, senderID int64) error {
+func (h *Handler) newGameStartFSM(c *Context, ctx context.Context, chatID, senderID int64) error {
 	if err := h.fsm.Set(ctx, &domain.FSMState{
 		ChatID:   chatID,
 		UserTgID: senderID,
@@ -63,7 +63,7 @@ func (h *Handler) newGameStartFSM(c telebot.Context, ctx context.Context, chatID
 }
 
 // newGameFromArgs создаёт игру из четырёх аргументов командной строки.
-func (h *Handler) newGameFromArgs(c telebot.Context, ctx context.Context, chatID, senderID int64, args []string) error {
+func (h *Handler) newGameFromArgs(c *Context, ctx context.Context, chatID, senderID int64, args []string) error {
 	buyInRub, e1 := strconv.Atoi(args[0])
 	buyInChips, e2 := strconv.Atoi(args[1])
 	rebuyRub, e3 := strconv.Atoi(args[2])
@@ -81,7 +81,7 @@ func (h *Handler) newGameFromArgs(c telebot.Context, ctx context.Context, chatID
 }
 
 // createGame записывает игру в БД и отправляет сводку в чат.
-func (h *Handler) createGame(c telebot.Context, ctx context.Context, chatID, dealerID int64, buyInRub, buyInChips, rebuyRub, rebuyChips int) error {
+func (h *Handler) createGame(c *Context, ctx context.Context, chatID, dealerID int64, buyInRub, buyInChips, rebuyRub, rebuyChips int) error {
 	id, err := h.game.NewGame(ctx, &domain.Game{
 		ChatID:     chatID,
 		DealerTgID: dealerID,
@@ -105,7 +105,7 @@ func (h *Handler) createGame(c telebot.Context, ctx context.Context, chatID, dea
 }
 
 // handleText обрабатывает текстовые сообщения для FSM-состояний (пошаговый /newgame).
-func (h *Handler) handleText(c telebot.Context) error {
+func (h *Handler) handleText(c *Context) error {
 	ctx := context.Background()
 
 	state, err := h.fsm.Get(ctx, c.Chat().ID, c.Sender().ID)
@@ -127,7 +127,7 @@ func (h *Handler) handleText(c telebot.Context) error {
 	return nil
 }
 
-func (h *Handler) fsmStepBuyInRub(c telebot.Context, ctx context.Context, state *domain.FSMState) error {
+func (h *Handler) fsmStepBuyInRub(c *Context, ctx context.Context, state *domain.FSMState) error {
 	v, err := parsePositiveInt(c.Text())
 	if err != nil {
 		return c.Reply("❌ Введи положительное целое число (рублей):")
@@ -140,7 +140,7 @@ func (h *Handler) fsmStepBuyInRub(c telebot.Context, ctx context.Context, state 
 	return c.Reply("Введи количество фишек для buy-in:")
 }
 
-func (h *Handler) fsmStepBuyInChips(c telebot.Context, ctx context.Context, state *domain.FSMState) error {
+func (h *Handler) fsmStepBuyInChips(c *Context, ctx context.Context, state *domain.FSMState) error {
 	v, err := parsePositiveInt(c.Text())
 	if err != nil {
 		return c.Reply("❌ Введи положительное целое число (фишек):")
@@ -153,7 +153,7 @@ func (h *Handler) fsmStepBuyInChips(c telebot.Context, ctx context.Context, stat
 	return c.Reply("Введи сумму rebuy в рублях:")
 }
 
-func (h *Handler) fsmStepRebuyRub(c telebot.Context, ctx context.Context, state *domain.FSMState) error {
+func (h *Handler) fsmStepRebuyRub(c *Context, ctx context.Context, state *domain.FSMState) error {
 	v, err := parsePositiveInt(c.Text())
 	if err != nil {
 		return c.Reply("❌ Введи положительное целое число (рублей):")
@@ -166,7 +166,7 @@ func (h *Handler) fsmStepRebuyRub(c telebot.Context, ctx context.Context, state 
 	return c.Reply("Введи количество фишек для rebuy:")
 }
 
-func (h *Handler) fsmStepRebuyChips(c telebot.Context, ctx context.Context, state *domain.FSMState) error {
+func (h *Handler) fsmStepRebuyChips(c *Context, ctx context.Context, state *domain.FSMState) error {
 	rebuyChips, err := parsePositiveInt(c.Text())
 	if err != nil {
 		return c.Reply("❌ Введи положительное целое число (фишек):")
@@ -194,13 +194,13 @@ func (h *Handler) fsmStepRebuyChips(c telebot.Context, ctx context.Context, stat
 	return h.createGame(c, ctx, state.ChatID, state.UserTgID, buyInRub, buyInChips, rebuyRub, rebuyChips)
 }
 
-func (h *Handler) handleEndGame(c telebot.Context) error      { return h.doEndGame(c, false) }
-func (h *Handler) handleEndGameForce(c telebot.Context) error { return h.doEndGame(c, true) }
+func (h *Handler) handleEndGame(c *Context) error      { return h.doEndGame(c, false) }
+func (h *Handler) handleEndGameForce(c *Context) error { return h.doEndGame(c, true) }
 
 // doEndGame — общая логика завершения игры.
 // force=false: требует нулевой банк.
 // force=true:  принимает расхождение, распределяет дельту пропорционально.
-func (h *Handler) doEndGame(c telebot.Context, force bool) error {
+func (h *Handler) doEndGame(c *Context, force bool) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -245,7 +245,7 @@ func (h *Handler) doEndGame(c telebot.Context, force bool) error {
 }
 
 // handleCancel запрашивает подтверждение отмены игры у дилера.
-func (h *Handler) handleCancel(c telebot.Context) error {
+func (h *Handler) handleCancel(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -256,20 +256,19 @@ func (h *Handler) handleCancel(c telebot.Context) error {
 		return nil
 	}
 
-	markup := &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Да, отменить", Data: fmt.Sprintf("cancel:%d:yes", game.ID)},
-			{Text: "❌ Нет", Data: fmt.Sprintf("cancel:%d:no", game.ID)},
-		}},
+	markup := &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Да, отменить", CallbackData: fmt.Sprintf("cancel:%d:yes", game.ID)},
+		{Text: "❌ Нет", CallbackData: fmt.Sprintf("cancel:%d:no", game.ID)},
+	}},
 	}
 	return c.Reply("⚠️ Отменить игру? Данные сохранятся, переводы не рассчитываются.", markup)
 }
 
-func (h *Handler) handleAdminCancel(_ telebot.Context) error { return nil }
+func (h *Handler) handleAdminCancel(_ *Context) error { return nil }
 
 // handleTransferDealer передаёт роль дилера активному участнику. Только текущий дилер.
 // Синтаксис: /transfer_dealer @username
-func (h *Handler) handleTransferDealer(c telebot.Context) error {
+func (h *Handler) handleTransferDealer(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -307,7 +306,7 @@ func (h *Handler) handleTransferDealer(c telebot.Context) error {
 }
 
 // handleJoin создаёт запрос на вход в игру, ожидающий подтверждения дилера.
-func (h *Handler) handleJoin(c telebot.Context) error {
+func (h *Handler) handleJoin(c *Context) error {
 	ctx := context.Background()
 	chatID := c.Chat().ID
 	senderID := c.Sender().ID
@@ -346,7 +345,7 @@ func (h *Handler) handleJoin(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.sendToChat(c, fmt.Sprintf(
+	err = c.Send(fmt.Sprintf(
 		"🃏 %s просит JOIN (buy-in: %d₽ → %d фишек). Подтвердить?",
 		playerName(c.Sender(), senderID), game.BuyInRub, game.BuyInChips,
 	), markup)
@@ -354,7 +353,7 @@ func (h *Handler) handleJoin(c telebot.Context) error {
 }
 
 // handleRebuy создаёт запрос на rebuy, ожидающий подтверждения дилера.
-func (h *Handler) handleRebuy(c telebot.Context) error {
+func (h *Handler) handleRebuy(c *Context) error {
 	ctx := context.Background()
 	chatID := c.Chat().ID
 	senderID := c.Sender().ID
@@ -393,7 +392,7 @@ func (h *Handler) handleRebuy(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.sendToChat(c, fmt.Sprintf(
+	err = c.Send(fmt.Sprintf(
 		"🃏 %s просит REBUY (%d₽ → %d фишек). Подтвердить?",
 		playerName(c.Sender(), senderID), game.RebuyRub, game.RebuyChips,
 	), markup)
@@ -402,7 +401,7 @@ func (h *Handler) handleRebuy(c telebot.Context) error {
 
 // handleDealerJoin запрашивает у дилера подтверждение добавления игрока.
 // Синтаксис: /dealer_join @username
-func (h *Handler) handleDealerJoin(c telebot.Context) error {
+func (h *Handler) handleDealerJoin(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -432,11 +431,10 @@ func (h *Handler) handleDealerJoin(c telebot.Context) error {
 		return c.Reply(fmt.Sprintf("❌ %s уже в игре.", formatPlayerByID(target, target.TelegramUserID)))
 	}
 
-	markup := &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Да", Data: fmt.Sprintf("djoin:%d:%d:yes", game.ID, target.TelegramUserID)},
-			{Text: "❌ Нет", Data: fmt.Sprintf("djoin:%d:%d:no", game.ID, target.TelegramUserID)},
-		}},
+	markup := &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Да", CallbackData: fmt.Sprintf("djoin:%d:%d:yes", game.ID, target.TelegramUserID)},
+		{Text: "❌ Нет", CallbackData: fmt.Sprintf("djoin:%d:%d:no", game.ID, target.TelegramUserID)},
+	}},
 	}
 	return c.Reply(fmt.Sprintf(
 		"Добавить %s в игру? (buy-in: %d₽ → %d фишек)",
@@ -446,7 +444,7 @@ func (h *Handler) handleDealerJoin(c telebot.Context) error {
 
 // handleDealerRebuy запрашивает у дилера подтверждение rebuy для игрока.
 // Синтаксис: /dealer_rebuy @username
-func (h *Handler) handleDealerRebuy(c telebot.Context) error {
+func (h *Handler) handleDealerRebuy(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -473,11 +471,10 @@ func (h *Handler) handleDealerRebuy(c telebot.Context) error {
 		return c.Reply(fmt.Sprintf("❌ %s не является активным участником игры.", formatPlayerByID(target, target.TelegramUserID)))
 	}
 
-	markup := &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Да", Data: fmt.Sprintf("drebuy:%d:%d:yes", game.ID, target.TelegramUserID)},
-			{Text: "❌ Нет", Data: fmt.Sprintf("drebuy:%d:%d:no", game.ID, target.TelegramUserID)},
-		}},
+	markup := &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Да", CallbackData: fmt.Sprintf("drebuy:%d:%d:yes", game.ID, target.TelegramUserID)},
+		{Text: "❌ Нет", CallbackData: fmt.Sprintf("drebuy:%d:%d:no", game.ID, target.TelegramUserID)},
+	}},
 	}
 	return c.Reply(fmt.Sprintf(
 		"Rebuy для %s? (%d₽ → %d фишек)",
@@ -487,7 +484,7 @@ func (h *Handler) handleDealerRebuy(c telebot.Context) error {
 
 // handleCashOut создаёт запрос на выход из игры, ожидающий подтверждения дилера.
 // Синтаксис: /cashout <chips>
-func (h *Handler) handleCashOut(c telebot.Context) error {
+func (h *Handler) handleCashOut(c *Context) error {
 	ctx := context.Background()
 	senderID := c.Sender().ID
 
@@ -541,7 +538,7 @@ func (h *Handler) handleCashOut(c telebot.Context) error {
 	}
 
 	markup := pendingMarkup(paID)
-	_, err = h.sendToChat(c, fmt.Sprintf(
+	err = c.Send(fmt.Sprintf(
 		"💸 %s хочет выйти: %d фишек = %d₽. Подтвердить?",
 		playerName(c.Sender(), senderID), chips, amountRub,
 	), markup)
@@ -550,7 +547,7 @@ func (h *Handler) handleCashOut(c telebot.Context) error {
 
 // handleDealerCashOut делает cashout за игрока с подтверждением дилера.
 // Синтаксис: /dealer_cashout @username <chips>
-func (h *Handler) handleDealerCashOut(c telebot.Context) error {
+func (h *Handler) handleDealerCashOut(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -590,11 +587,10 @@ func (h *Handler) handleDealerCashOut(c telebot.Context) error {
 		))
 	}
 
-	markup := &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Да", Data: fmt.Sprintf("dcashout:%d:%d:%d:yes", game.ID, target.TelegramUserID, chips)},
-			{Text: "❌ Нет", Data: fmt.Sprintf("dcashout:%d:%d:%d:no", game.ID, target.TelegramUserID, chips)},
-		}},
+	markup := &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Да", CallbackData: fmt.Sprintf("dcashout:%d:%d:%d:yes", game.ID, target.TelegramUserID, chips)},
+		{Text: "❌ Нет", CallbackData: fmt.Sprintf("dcashout:%d:%d:%d:no", game.ID, target.TelegramUserID, chips)},
+	}},
 	}
 	return c.Reply(fmt.Sprintf(
 		"💸 Cashout для %s: %d фишек = %d₽?",
@@ -604,7 +600,7 @@ func (h *Handler) handleDealerCashOut(c telebot.Context) error {
 
 // handleUndo аннулирует последние N записей леджера. Только дилер.
 // Синтаксис: /undo [N] (по умолчанию N=1)
-func (h *Handler) handleUndo(c telebot.Context) error {
+func (h *Handler) handleUndo(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.getActiveGameForDealer(c, ctx)
@@ -641,7 +637,7 @@ func (h *Handler) handleUndo(c telebot.Context) error {
 }
 
 // handleStatus показывает состояние текущей игры: курс, банк, участники, pending.
-func (h *Handler) handleStatus(c telebot.Context) error {
+func (h *Handler) handleStatus(c *Context) error {
 	ctx := context.Background()
 
 	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
@@ -758,10 +754,9 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 
 	// Если все вышли и вызывает дилер — предлагаем завершить игру
 	if len(active) == 0 && len(out) > 0 && game.DealerTgID == c.Sender().ID {
-		markup := &telebot.ReplyMarkup{
-			InlineKeyboard: [][]telebot.InlineButton{{
-				{Text: "🏁 Завершить игру", Data: fmt.Sprintf("endgame:%d", game.ID)},
-			}},
+		markup := &Markup{InlineKeyboard: [][]Button{{
+			{Text: "🏁 Завершить игру", CallbackData: fmt.Sprintf("endgame:%d", game.ID)},
+		}},
 		}
 		return c.Reply(sb.String(), markup)
 	}
@@ -770,7 +765,7 @@ func (h *Handler) handleStatus(c telebot.Context) error {
 }
 
 // handleMe показывает личные показатели пользователя в текущей игре.
-func (h *Handler) handleMe(c telebot.Context) error {
+func (h *Handler) handleMe(c *Context) error {
 	ctx := context.Background()
 	senderID := c.Sender().ID
 
@@ -832,7 +827,7 @@ func (h *Handler) handleMe(c telebot.Context) error {
 }
 
 // handleHistory показывает последние N завершённых игр в чате (по умолчанию 10).
-func (h *Handler) handleHistory(c telebot.Context) error {
+func (h *Handler) handleHistory(c *Context) error {
 	ctx := context.Background()
 	n := 10
 	if args := c.Args(); len(args) == 1 {
@@ -885,12 +880,12 @@ func (h *Handler) handleHistory(c telebot.Context) error {
 	return c.Reply(sb.String())
 }
 
-func (h *Handler) handleGame(_ telebot.Context) error { return nil }
+func (h *Handler) handleGame(_ *Context) error { return nil }
 
 // handleStats показывает статистику чата или конкретного игрока.
 // /stats          — топ игроков чата по суммарному net_rub
 // /stats @username — статистика конкретного игрока
-func (h *Handler) handleStats(c telebot.Context) error {
+func (h *Handler) handleStats(c *Context) error {
 	ctx := context.Background()
 	chatID := c.Chat().ID
 
@@ -901,7 +896,7 @@ func (h *Handler) handleStats(c telebot.Context) error {
 	return h.statsPlayer(c, ctx, chatID, strings.TrimPrefix(args[0], "@"))
 }
 
-func (h *Handler) statsLeaderboard(c telebot.Context, ctx context.Context, chatID int64) error {
+func (h *Handler) statsLeaderboard(c *Context, ctx context.Context, chatID int64) error {
 	stats, err := h.game.GetLeaderboard(ctx, chatID)
 	if err != nil {
 		h.log.Error("leaderboard", zap.Error(err))
@@ -926,7 +921,7 @@ func (h *Handler) statsLeaderboard(c telebot.Context, ctx context.Context, chatI
 	return c.Reply(sb.String())
 }
 
-func (h *Handler) statsPlayer(c telebot.Context, ctx context.Context, chatID int64, username string) error {
+func (h *Handler) statsPlayer(c *Context, ctx context.Context, chatID int64, username string) error {
 	player, err := h.player.GetByUsername(ctx, username)
 	if err != nil {
 		return c.Reply(fmt.Sprintf("❌ Игрок @%s не найден.", username))
@@ -960,7 +955,7 @@ func (h *Handler) statsPlayer(c telebot.Context, ctx context.Context, chatID int
 }
 
 // handleCallback диспетчеризует нажатия инлайн-кнопок.
-func (h *Handler) handleCallback(c telebot.Context) error {
+func (h *Handler) handleCallback(c *Context) error {
 	data := c.Callback().Data
 	parts := strings.Split(data, ":")
 	if len(parts) < 2 {
@@ -986,7 +981,7 @@ func (h *Handler) handleCallback(c telebot.Context) error {
 }
 
 // handlePendingCallback обрабатывает подтверждение/отклонение JOIN или REBUY.
-func (h *Handler) handlePendingCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handlePendingCallback(c *Context, parts []string) error {
 	if len(parts) != 3 {
 		return c.Respond()
 	}
@@ -1000,22 +995,22 @@ func (h *Handler) handlePendingCallback(c telebot.Context, parts []string) error
 
 	pa, err := h.pending.GetByID(ctx, paID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Запрос не найден."})
+		return c.Respond(&CallbackResponse{Text: "Запрос не найден."})
 	}
 
 	// Идемпотентность: если уже обработан — просто обновляем сообщение
 	if pa.Status != domain.PendingStatusPending {
 		_ = c.Edit(pendingResolvedText(pa))
-		return c.Respond(&telebot.CallbackResponse{Text: "Запрос уже обработан."})
+		return c.Respond(&CallbackResponse{Text: "Запрос уже обработан."})
 	}
 
 	// Только дилер может подтверждать
 	game, err := h.game.GetGame(ctx, pa.GameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.DealerTgID != senderID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Только дилер может подтверждать запросы."})
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать запросы."})
 	}
 
 	newStatus := domain.PendingStatusRejected
@@ -1026,7 +1021,7 @@ func (h *Handler) handlePendingCallback(c telebot.Context, parts []string) error
 	resolved, err := h.pending.Resolve(ctx, paID, newStatus, senderID)
 	if err != nil {
 		// 0 строк — кто-то успел раньше (гонка двойного клика)
-		return c.Respond(&telebot.CallbackResponse{Text: "Запрос уже обработан."})
+		return c.Respond(&CallbackResponse{Text: "Запрос уже обработан."})
 	}
 
 	// Выполняем действие при подтверждении
@@ -1057,7 +1052,7 @@ func (h *Handler) handlePendingCallback(c telebot.Context, parts []string) error
 
 // handleDealerJoinCallback выполняет buy-in после подтверждения дилером.
 // Формат data: djoin:<game_id>:<target_tg_id>:yes|no
-func (h *Handler) handleDealerJoinCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleDealerJoinCallback(c *Context, parts []string) error {
 	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) error {
 		return h.game.BuyIn(ctx, game, targetID, c.Sender().ID)
 	}, func(game *domain.Game, target *domain.Player, targetID int64) string {
@@ -1068,7 +1063,7 @@ func (h *Handler) handleDealerJoinCallback(c telebot.Context, parts []string) er
 
 // handleDealerRebuyCallback выполняет rebuy после подтверждения дилером.
 // Формат data: drebuy:<game_id>:<target_tg_id>:yes|no
-func (h *Handler) handleDealerRebuyCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleDealerRebuyCallback(c *Context, parts []string) error {
 	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) error {
 		return h.game.Rebuy(ctx, game, targetID, c.Sender().ID)
 	}, func(game *domain.Game, target *domain.Player, targetID int64) string {
@@ -1079,7 +1074,7 @@ func (h *Handler) handleDealerRebuyCallback(c telebot.Context, parts []string) e
 
 // handleEndGameCallback завершает игру по нажатию кнопки из /status.
 // Формат data: endgame:<game_id>
-func (h *Handler) handleEndGameCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleEndGameCallback(c *Context, parts []string) error {
 	if len(parts) != 2 {
 		return c.Respond()
 	}
@@ -1091,14 +1086,14 @@ func (h *Handler) handleEndGameCallback(c telebot.Context, parts []string) error
 	ctx := context.Background()
 	game, err := h.game.GetGame(ctx, gameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.Status != domain.GameStatusActive {
 		_ = c.Edit("Игра уже не активна.")
 		return c.Respond()
 	}
 	if game.DealerTgID != c.Sender().ID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Только дилер может завершить игру."})
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может завершить игру."})
 	}
 
 	bank, err := h.game.GetBank(ctx, gameID)
@@ -1113,7 +1108,7 @@ func (h *Handler) handleEndGameCallback(c telebot.Context, parts []string) error
 	settlements, err := h.game.Finish(ctx, gameID, 0)
 	if err != nil {
 		h.log.Error("завершение игры (callback)", zap.Error(err))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка при завершении игры."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка при завершении игры."})
 	}
 
 	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, 0, settlements), settleMarkup(gameID, settlements))
@@ -1122,7 +1117,7 @@ func (h *Handler) handleEndGameCallback(c telebot.Context, parts []string) error
 
 // handleSettleCallback отмечает переводы нажавшего: исходящие — «оплачено»,
 // входящие — «получено». Формат data: settle:<game_id>
-func (h *Handler) handleSettleCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleSettleCallback(c *Context, parts []string) error {
 	if len(parts) != 2 {
 		return c.Respond()
 	}
@@ -1136,41 +1131,41 @@ func (h *Handler) handleSettleCallback(c telebot.Context, parts []string) error 
 
 	game, err := h.game.GetGame(ctx, gameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.Status != domain.GameStatusFinished {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не завершена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не завершена."})
 	}
 
 	changed, err := h.game.MarkSettlementsByPlayer(ctx, gameID, senderID)
 	if err != nil {
 		h.log.Error("отметка переводов", zap.Error(err), zap.Int64("game_id", gameID))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка. Попробуй позже."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
 	settlements, err := h.game.ListSettlements(ctx, gameID)
 	if err != nil {
 		h.log.Error("список переводов", zap.Error(err), zap.Int64("game_id", gameID))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка. Попробуй позже."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
 	if changed == 0 {
 		for _, s := range settlements {
 			if s.FromTgID == senderID || s.ToTgID == senderID {
-				return c.Respond(&telebot.CallbackResponse{Text: "Уже отмечено."})
+				return c.Respond(&CallbackResponse{Text: "Уже отмечено."})
 			}
 		}
-		return c.Respond(&telebot.CallbackResponse{Text: "Вас нет в переводах этой игры."})
+		return c.Respond(&CallbackResponse{Text: "Вас нет в переводах этой игры."})
 	}
 
 	// Когда все расчёты закрыты, settleMarkup == nil и правка без клавиатуры убирает кнопку.
 	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, game.BankDeltaRub, settlements), settleMarkup(gameID, settlements))
-	return c.Respond(&telebot.CallbackResponse{Text: "Отмечено ✅"})
+	return c.Respond(&CallbackResponse{Text: "Отмечено ✅"})
 }
 
 // handleDealerCashOutCallback выполняет cashout после подтверждения дилером.
 // Формат data: dcashout:<game_id>:<target_tg_id>:<chips>:yes|no
-func (h *Handler) handleDealerCashOutCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleDealerCashOutCallback(c *Context, parts []string) error {
 	if len(parts) != 5 {
 		return c.Respond()
 	}
@@ -1190,10 +1185,10 @@ func (h *Handler) handleDealerCashOutCallback(c telebot.Context, parts []string)
 	ctx := context.Background()
 	game, err := h.game.GetGame(ctx, gameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.DealerTgID != c.Sender().ID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Только дилер может подтверждать."})
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать."})
 	}
 
 	if parts[4] == "no" {
@@ -1204,7 +1199,7 @@ func (h *Handler) handleDealerCashOutCallback(c telebot.Context, parts []string)
 	cancelled, err := h.game.CashOut(ctx, game, targetID, chips, c.Sender().ID)
 	if err != nil {
 		h.log.Error("dealer cashout callback", zap.Error(err))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка выполнения."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
 	}
 	h.editCancelledPending(cancelled)
 
@@ -1217,7 +1212,7 @@ func (h *Handler) handleDealerCashOutCallback(c telebot.Context, parts []string)
 
 // handleDealerActionCallback — общий обработчик для djoin/drebuy callback-ов.
 func (h *Handler) handleDealerActionCallback(
-	c telebot.Context,
+	c *Context,
 	parts []string,
 	execute func(ctx context.Context, game *domain.Game, targetID int64) error,
 	successText func(game *domain.Game, target *domain.Player, targetID int64) string,
@@ -1237,10 +1232,10 @@ func (h *Handler) handleDealerActionCallback(
 	ctx := context.Background()
 	game, err := h.game.GetGame(ctx, gameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.DealerTgID != c.Sender().ID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Только дилер может подтверждать."})
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать."})
 	}
 
 	if parts[3] == "no" {
@@ -1250,7 +1245,7 @@ func (h *Handler) handleDealerActionCallback(
 
 	if err := execute(ctx, game, targetID); err != nil {
 		h.log.Error("dealer action callback", zap.Error(err))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка выполнения."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
 	}
 
 	target, _ := h.player.GetByID(ctx, targetID)
@@ -1259,7 +1254,7 @@ func (h *Handler) handleDealerActionCallback(
 }
 
 // handleCancelCallback обрабатывает подтверждение/отказ от отмены игры.
-func (h *Handler) handleCancelCallback(c telebot.Context, parts []string) error {
+func (h *Handler) handleCancelCallback(c *Context, parts []string) error {
 	if len(parts) != 3 {
 		return c.Respond()
 	}
@@ -1271,14 +1266,14 @@ func (h *Handler) handleCancelCallback(c telebot.Context, parts []string) error 
 	ctx := context.Background()
 	game, err := h.game.GetGame(ctx, gameID)
 	if err != nil {
-		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
 	}
 	if game.Status != domain.GameStatusActive {
 		_ = c.Edit("Игра уже не активна.")
 		return c.Respond()
 	}
 	if game.DealerTgID != c.Sender().ID {
-		return c.Respond(&telebot.CallbackResponse{Text: "❌ Только дилер может отменить игру."})
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может отменить игру."})
 	}
 
 	if parts[2] == "no" {
@@ -1288,7 +1283,7 @@ func (h *Handler) handleCancelCallback(c telebot.Context, parts []string) error 
 
 	if err := h.game.Cancel(ctx, gameID); err != nil {
 		h.log.Error("отмена игры", zap.Error(err))
-		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка при отмене игры."})
+		return c.Respond(&CallbackResponse{Text: "Ошибка при отмене игры."})
 	}
 
 	_ = c.Edit(fmt.Sprintf("🚫 Игра #%d отменена.", gameID))
@@ -1299,7 +1294,7 @@ func (h *Handler) handleCancelCallback(c telebot.Context, parts []string) error 
 
 // getActiveGameForDealer возвращает активную игру, если вызывает дилер.
 // Если условие не выполнено — сам отвечает пользователю и возвращает (nil, nil).
-func (h *Handler) getActiveGameForDealer(c telebot.Context, ctx context.Context) (*domain.Game, error) {
+func (h *Handler) getActiveGameForDealer(c *Context, ctx context.Context) (*domain.Game, error) {
 	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
 	if errors.Is(err, service.ErrNoActiveGame) {
 		return nil, c.Send("❌ Нет активной игры.")
@@ -1374,20 +1369,19 @@ func allSettled(settlements []domain.Settlement) bool {
 
 // settleMarkup возвращает кнопку отметки оплаты/получения или nil,
 // если переводов нет или все они уже закрыты.
-func settleMarkup(gameID int64, settlements []domain.Settlement) *telebot.ReplyMarkup {
+func settleMarkup(gameID int64, settlements []domain.Settlement) *Markup {
 	if len(settlements) == 0 || allSettled(settlements) {
 		return nil
 	}
-	return &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Я оплатил / получил", Data: fmt.Sprintf("settle:%d", gameID)},
-		}},
+	return &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Я оплатил / получил", CallbackData: fmt.Sprintf("settle:%d", gameID)},
+	}},
 	}
 }
 
 // --- форматирование ---
 
-func playerName(u *telebot.User, fallbackID int64) string {
+func playerName(u *tg.User, fallbackID int64) string {
 	if u == nil {
 		return fmt.Sprintf("id%d", fallbackID)
 	}
@@ -1416,12 +1410,11 @@ func formatRate(rub, chips int) string {
 }
 
 // pendingMarkup возвращает инлайн-клавиатуру для запроса подтверждения.
-func pendingMarkup(paID int64) *telebot.ReplyMarkup {
-	return &telebot.ReplyMarkup{
-		InlineKeyboard: [][]telebot.InlineButton{{
-			{Text: "✅ Подтвердить", Data: fmt.Sprintf("pa:%d:yes", paID)},
-			{Text: "❌ Отклонить", Data: fmt.Sprintf("pa:%d:no", paID)},
-		}},
+func pendingMarkup(paID int64) *Markup {
+	return &Markup{InlineKeyboard: [][]Button{{
+		{Text: "✅ Подтвердить", CallbackData: fmt.Sprintf("pa:%d:yes", paID)},
+		{Text: "❌ Отклонить", CallbackData: fmt.Sprintf("pa:%d:no", paID)},
+	}},
 	}
 }
 
@@ -1453,8 +1446,14 @@ func (h *Handler) editCancelledPending(cancelled []domain.PendingAction) {
 		if pa.MessageID == nil {
 			continue
 		}
-		msg := &telebot.Message{ID: int(*pa.MessageID), Chat: &telebot.Chat{ID: pa.ChatID}}
-		_, _ = h.bot.Edit(msg, pendingResolvedText(&pa), telebot.ModeDefault)
+		err := h.api.EditMessageText(context.Background(), tg.EditMessageTextRequest{
+			ChatID:    pa.ChatID,
+			MessageID: int(*pa.MessageID),
+			Text:      pendingResolvedText(&pa),
+		})
+		if err != nil && !tg.IsMessageNotModified(err) {
+			h.log.Warn("edit cancelled pending", zap.Error(err), zap.Int64("pending_id", pa.ID))
+		}
 	}
 }
 

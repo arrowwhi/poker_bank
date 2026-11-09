@@ -4,16 +4,18 @@ import (
 	"sync"
 	"time"
 
+	tg "github.com/arrowwhi/infrastructure/telegram"
 	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
 
 	"poker_bank/internal/interfaces"
+	"poker_bank/internal/pkg/tgforum"
 	"poker_bank/internal/service"
 )
 
 // Handler holds the Telegram bot and all service dependencies used by command handlers.
 type Handler struct {
-	bot       *telebot.Bot
+	api       *tg.Client
+	forum     *tgforum.Tracker
 	game      *service.GameService
 	player    *service.PlayerService
 	pending   *service.PendingService
@@ -31,7 +33,7 @@ type Handler struct {
 
 // NewHandler creates a Handler wired up with the provided bot and services.
 func NewHandler(
-	bot *telebot.Bot,
+	forum *tgforum.Tracker,
 	game *service.GameService,
 	player *service.PlayerService,
 	pending *service.PendingService,
@@ -40,7 +42,7 @@ func NewHandler(
 	log *zap.Logger,
 ) *Handler {
 	return &Handler{
-		bot:        bot,
+		forum:      forum,
 		game:       game,
 		player:     player,
 		pending:    pending,

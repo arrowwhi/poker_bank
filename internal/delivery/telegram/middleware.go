@@ -4,16 +4,16 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
+
+	tg "github.com/arrowwhi/infrastructure/telegram"
 
 	"poker_bank/internal/domain"
 )
 
-// UpsertPlayer upserts the sender on every incoming message.
-func (h *Handler) UpsertPlayer(next telebot.HandlerFunc) telebot.HandlerFunc {
-	return func(c telebot.Context) error {
-		u := c.Sender()
-		if u != nil {
+// UpsertPlayer upserts the sender on every incoming update.
+func (h *Handler) UpsertPlayer(next tg.HandlerFunc) tg.HandlerFunc {
+	return func(c *tg.Context) error {
+		if u := c.User(); u != nil && !u.IsBot {
 			p := &domain.Player{
 				TelegramUserID: u.ID,
 				Username:       u.Username,

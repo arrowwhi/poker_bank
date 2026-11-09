@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
 
 // GameResultRepo is a PostgreSQL implementation of GameResultRepository.
 type GameResultRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewGameResultRepo creates a new GameResultRepo.
-func NewGameResultRepo(db *pgxpool.Pool) *GameResultRepo {
+func NewGameResultRepo(db *infrapg.Pool) *GameResultRepo {
 	return &GameResultRepo{db: db}
 }
 

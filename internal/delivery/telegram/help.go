@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"gopkg.in/telebot.v3"
-
 	"poker_bank/internal/service"
 )
 
@@ -62,7 +60,7 @@ var roleLabels = map[role]string{
 	roleDealer:   "🎩 Вы дилер",
 }
 
-func (h *Handler) handleHelp(c telebot.Context) error {
+func (h *Handler) handleHelp(c *Context) error {
 	ctx := context.Background()
 
 	r := h.resolveRole(ctx, c.Chat().ID, c.Sender().ID)
@@ -108,6 +106,6 @@ func hasRole(roles []role, r role) bool {
 }
 
 // handleStart отправляет приветствие с подсказкой про /help.
-func (h *Handler) handleStart(c telebot.Context) error {
+func (h *Handler) handleStart(c *Context) error {
 	return c.Reply("Привет, " + playerName(c.Sender(), c.Sender().ID) + "! Я бот-банкир для покера.\nИспользуй /help для списка доступных команд.")
 }

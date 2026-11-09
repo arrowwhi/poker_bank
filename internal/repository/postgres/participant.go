@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
 
 // ParticipantRepo implements interfaces.ParticipantRepository using a PostgreSQL connection pool.
 type ParticipantRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewParticipantRepo creates a new ParticipantRepo backed by the given connection pool.
-func NewParticipantRepo(db *pgxpool.Pool) *ParticipantRepo {
+func NewParticipantRepo(db *infrapg.Pool) *ParticipantRepo {
 	return &ParticipantRepo{db: db}
 }
 

@@ -5,14 +5,15 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
+
+	"poker_bank/internal/pkg/tgforum"
 )
 
 // handleSetTopic binds the chat to the topic the command was sent in.
 // Only chat administrators may run it, and it must be invoked inside a forum topic.
-func (h *Handler) handleSetTopic(c telebot.Context) error {
+func (h *Handler) handleSetTopic(c *Context) error {
 	chat := c.Chat()
-	if chat == nil || (chat.Type != telebot.ChatGroup && chat.Type != telebot.ChatSuperGroup) {
+	if chat == nil || (chat.Type != "group" && chat.Type != "supergroup") {
 		return c.Reply("❌ Команду нужно отправить в нужном топике группового чата.")
 	}
 
@@ -20,7 +21,7 @@ func (h *Handler) handleSetTopic(c telebot.Context) error {
 		return c.Reply("❌ Привязать топик может только администратор чата.")
 	}
 
-	topicID := int64(c.Message().ThreadID)
+	topicID := int64(c.ThreadID())
 	if topicID == 0 {
 		return c.Reply("❌ Отправьте /set_topic внутри нужного топика (не в General).")
 	}
@@ -35,9 +36,9 @@ func (h *Handler) handleSetTopic(c telebot.Context) error {
 
 // handleUnsetTopic removes the chat-to-topic binding so the bot works everywhere again.
 // Only chat administrators may run it.
-func (h *Handler) handleUnsetTopic(c telebot.Context) error {
+func (h *Handler) handleUnsetTopic(c *Context) error {
 	chat := c.Chat()
-	if chat == nil || (chat.Type != telebot.ChatGroup && chat.Type != telebot.ChatSuperGroup) {
+	if chat == nil || (chat.Type != "group" && chat.Type != "supergroup") {
 		return c.Reply("❌ Команду нужно отправить в групповом чате.")
 	}
 
@@ -54,11 +55,11 @@ func (h *Handler) handleUnsetTopic(c telebot.Context) error {
 }
 
 // isChatAdmin reports whether the message sender is an administrator or creator of the chat.
-func (h *Handler) isChatAdmin(c telebot.Context) bool {
-	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
+func (h *Handler) isChatAdmin(c *Context) bool {
+	member, err := tgforum.GetChatMember(c, c.API(), c.Chat().ID, c.Sender().ID)
 	if err != nil {
 		h.log.Warn("check chat admin", zap.Error(err), zap.Int64("chat_id", c.Chat().ID))
 		return false
 	}
-	return member.Role == telebot.Administrator || member.Role == telebot.Creator
+	return member.IsAdmin()
 }

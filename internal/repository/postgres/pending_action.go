@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
 
 // PendingActionRepo implements interfaces.PendingActionRepository using a PostgreSQL connection pool.
 type PendingActionRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewPendingActionRepo creates a new PendingActionRepo backed by the given connection pool.
-func NewPendingActionRepo(db *pgxpool.Pool) *PendingActionRepo {
+func NewPendingActionRepo(db *infrapg.Pool) *PendingActionRepo {
 	return &PendingActionRepo{db: db}
 }
 

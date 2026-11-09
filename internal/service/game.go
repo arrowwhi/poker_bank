@@ -258,6 +258,11 @@ func (s *GameService) GetLedger(ctx context.Context, gameID int64) ([]domain.Led
 	return s.ledger.ListByGame(ctx, gameID)
 }
 
+// ListActiveGamesOfPlayer returns active games where the player deals or plays.
+func (s *GameService) ListActiveGamesOfPlayer(ctx context.Context, tgID int64) ([]domain.Game, error) {
+	return s.games.ListActiveByPlayer(ctx, tgID)
+}
+
 // GetHistory returns the last n finished games for a chat.
 func (s *GameService) GetHistory(ctx context.Context, chatID int64, n int) ([]domain.Game, error) {
 	return s.games.ListFinishedByChat(ctx, chatID, n)

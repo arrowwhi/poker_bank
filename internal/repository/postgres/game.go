@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -13,11 +12,11 @@ import (
 
 // GameRepo is a PostgreSQL implementation of interfaces.GameRepository.
 type GameRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewGameRepo creates a new GameRepo backed by the given connection pool.
-func NewGameRepo(db *pgxpool.Pool) *GameRepo {
+func NewGameRepo(db *infrapg.Pool) *GameRepo {
 	return &GameRepo{db: db}
 }
 
@@ -101,6 +100,37 @@ func (r *GameRepo) ListFinishedByChat(ctx context.Context, chatID int64, limit i
 	return games, rows.Err()
 }
 
+// ListActiveByPlayer returns active games where the player is the dealer or a participant.
+func (r *GameRepo) ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain.Game, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT g.id, g.chat_id, g.dealer_tg_id, g.buy_in_rub, g.buy_in_chips, g.rebuy_rub, g.rebuy_chips,
+		       g.status, g.started_at, g.ended_at, g.bank_delta_rub
+		FROM games g
+		WHERE g.status = 'active'
+		  AND (g.dealer_tg_id = $1
+		       OR EXISTS (SELECT 1 FROM participants p WHERE p.game_id = g.id AND p.player_tg_id = $1))
+		ORDER BY g.started_at DESC
+	`, tgID)
+	if err != nil {
+		return nil, fmt.Errorf("list active games by player: %w", err)
+	}
+	defer rows.Close()
+
+	var games []domain.Game
+	for rows.Next() {
+		var g domain.Game
+		if err := rows.Scan(
+			&g.ID, &g.ChatID, &g.DealerTgID,
+			&g.BuyInRub, &g.BuyInChips, &g.RebuyRub, &g.RebuyChips,
+			&g.Status, &g.StartedAt, &g.EndedAt, &g.BankDeltaRub,
+		); err != nil {
+			return nil, fmt.Errorf("scan game: %w", err)
+		}
+		games = append(games, g)
+	}
+	return games, rows.Err()
+}
+
 // UpdateDealer sets a new dealer for the given game.
 func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error {
 	_, err := r.db.Exec(ctx,
@@ -115,9 +145,9 @@ func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64)
 
 // Finish executes the end-game transaction: writes game_results, settlements, updates status.
 func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParams) error {
-	return pgx.BeginTxFunc(ctx, r.db, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	return r.db.InTx(ctx, func(ctx context.Context) error {
 		for _, res := range params.Results {
-			_, err := tx.Exec(ctx, `
+			_, err := r.db.Exec(ctx, `
 				INSERT INTO game_results
 				  (game_id, player_tg_id, buy_in_count, rebuy_count,
 				   total_in_rub, total_out_rub, total_out_chips, net_rub)
@@ -131,7 +161,7 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 		}
 
 		for _, s := range params.Settlements {
-			_, err := tx.Exec(ctx, `
+			_, err := r.db.Exec(ctx, `
 				INSERT INTO settlements (game_id, from_tg_id, to_tg_id, amount_rub)
 				VALUES ($1,$2,$3,$4)
 			`, s.GameID, s.FromTgID, s.ToTgID, s.AmountRub)
@@ -140,7 +170,7 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 			}
 		}
 
-		_, err := tx.Exec(ctx, `
+		_, err := r.db.Exec(ctx, `
 			UPDATE games SET status = 'finished', ended_at = now(), bank_delta_rub = $1 WHERE id = $2
 		`, params.BankDeltaRub, params.GameID)
 		if err != nil {

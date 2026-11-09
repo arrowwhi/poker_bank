@@ -1,0 +1,65 @@
+/* Токены «Банкир» — значения из Figma (коллекции «Банкир · Light» / «Банкир · Dark»).
+   В Telegram часть из них перекрывается themeParams (см. telegram/theme.ts). */
+:root,
+:root[data-theme='light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f1f2f6;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f4f5f8;
+  --text-primary: #111318;
+  --text-secondary: #5e6672;
+  --text-hint: #8a8f98;
+  --text-on-accent: #ffffff;
+  --border-separator: #e3e5ea;
+  --accent-primary: #3390ec;
+  --accent-soft: #e8f2fd;
+  --status-success: #2fa84f;
+  --status-success-soft: #e6f6ea;
+  --status-danger: #e5484d;
+  --status-danger-soft: #fdecec;
+  --status-warning: #e89b0c;
+  --status-warning-soft: #fff4dc;
+  --brand-dealer: #c08a00;
+  --brand-felt: #1e7a4c;
+  --overlay-scrim: #00000066;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg-primary: #17212b;
+  --bg-secondary: #0e1621;
+  --bg-surface: #1e2c3a;
+  --bg-elevated: #243545;
+  --text-primary: #f5f7fa;
+  --text-secondary: #a7b3bf;
+  --text-hint: #6f7e8c;
+  --text-on-accent: #ffffff;
+  --border-separator: #2b3a49;
+  --accent-primary: #4fa3e0;
+  --accent-soft: #1f3448;
+  --status-success: #4cc764;
+  --status-success-soft: #1d3a2a;
+  --status-danger: #ff6b6b;
+  --status-danger-soft: #3f2326;
+  --status-warning: #f7b955;
+  --status-warning-soft: #3d3220;
+  --brand-dealer: #e8b730;
+  --brand-felt: #1b6b44;
+  --overlay-scrim: #00000099;
+  color-scheme: dark;
+}
+
+:root {
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --gap: 12px;
+  --pad: 16px;
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
+  --safe-right: 0px;
+  --vh-stable: 100vh;
+  --mainbar-h: 0px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}

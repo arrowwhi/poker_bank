@@ -15,9 +15,9 @@ Telegram-бот для управления банком на домашних �
 
 ## Стек
 
-- **Go 1.25**
+- **Go 1.26**
 - **PostgreSQL 15** — хранение всех данных
-- **telebot.v3** — Telegram Bot API
+- **github.com/arrowwhi/infrastructure** — скелет сервиса: Telegram-бот, HTTP-сервер, пул PostgreSQL, миграции, метрики
 - **pgx v5** — драйвер PostgreSQL
 - **goose** — миграции базы данных
 - **uber/zap** — структурированное логирование

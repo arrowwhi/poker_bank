@@ -4,19 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
 
 // SettlementRepo is a PostgreSQL implementation of interfaces.SettlementRepository.
 type SettlementRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewSettlementRepo creates a new SettlementRepo backed by the given connection pool.
-func NewSettlementRepo(db *pgxpool.Pool) *SettlementRepo {
+func NewSettlementRepo(db *infrapg.Pool) *SettlementRepo {
 	return &SettlementRepo{db: db}
 }
 
@@ -73,8 +72,8 @@ func (r *SettlementRepo) MarkPaid(ctx context.Context, id int64) error {
 // so repeated calls are idempotent. Returns the number of changed rows.
 func (r *SettlementRepo) MarkByPlayer(ctx context.Context, gameID, tgID int64) (int64, error) {
 	var changed int64
-	err := pgx.BeginTxFunc(ctx, r.db, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
+	err := r.db.InTx(ctx, func(ctx context.Context) error {
+		tag, err := r.db.Exec(ctx, `
 			UPDATE settlements SET is_paid = true, paid_at = now()
 			WHERE game_id = $1 AND from_tg_id = $2 AND NOT is_paid
 		`, gameID, tgID)
@@ -83,7 +82,7 @@ func (r *SettlementRepo) MarkByPlayer(ctx context.Context, gameID, tgID int64) (
 		}
 		changed += tag.RowsAffected()
 
-		tag, err = tx.Exec(ctx, `
+		tag, err = r.db.Exec(ctx, `
 			UPDATE settlements SET is_received = true, received_at = now()
 			WHERE game_id = $1 AND to_tg_id = $2 AND NOT is_received
 		`, gameID, tgID)

@@ -5,19 +5,19 @@ import (
 	"errors"
 	"fmt"
 
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"poker_bank/internal/domain"
 )
 
 // ChatTopicRepo implements interfaces.ChatTopicRepository using a PostgreSQL connection pool.
 type ChatTopicRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewChatTopicRepo creates a new ChatTopicRepo backed by the given connection pool.
-func NewChatTopicRepo(db *pgxpool.Pool) *ChatTopicRepo {
+func NewChatTopicRepo(db *infrapg.Pool) *ChatTopicRepo {
 	return &ChatTopicRepo{db: db}
 }
 

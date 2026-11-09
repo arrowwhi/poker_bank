@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
 
 // LedgerRepo is a PostgreSQL implementation of interfaces.LedgerRepository.
 type LedgerRepo struct {
-	db *pgxpool.Pool
+	db *infrapg.Pool
 }
 
 // NewLedgerRepo creates a new LedgerRepo backed by the given connection pool.
-func NewLedgerRepo(db *pgxpool.Pool) *LedgerRepo {
+func NewLedgerRepo(db *infrapg.Pool) *LedgerRepo {
 	return &LedgerRepo{db: db}
 }
 

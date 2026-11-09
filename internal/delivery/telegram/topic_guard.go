@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
-)
 
-// ctxTopicID is the telebot context key under which TopicGuard stores the
-// resolved topic id for the current chat, so outgoing helpers can target it.
-const ctxTopicID = "topic_id"
+	tg "github.com/arrowwhi/infrastructure/telegram"
+
+	"poker_bank/internal/pkg/tgforum"
+)
 
 // hintInterval limits how often the "wrong topic" hint is sent per chat.
 const hintInterval = time.Hour
@@ -19,20 +18,20 @@ const hintInterval = time.Hour
 // TopicGuard restricts the bot to a single forum topic when the chat has a
 // binding. Messages outside the bound topic are not handled; instead the bot
 // posts a throttled hint pointing users to the correct topic.
-func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
-	return func(c telebot.Context) error {
+func (h *Handler) TopicGuard(next tg.HandlerFunc) tg.HandlerFunc {
+	return func(c *tg.Context) error {
 		// Callbacks are tied to messages already published inside the topic.
 		if c.Callback() != nil {
 			return next(c)
 		}
 
-		chat := c.Chat()
+		chat := c.Update.Chat()
 		// Private chats are never restricted.
-		if chat == nil || chat.Type == telebot.ChatPrivate {
+		if chat == nil || chat.IsPrivate() {
 			return next(c)
 		}
 
-		msg := c.Message()
+		msg := c.Update.Message
 		if msg == nil {
 			return next(c)
 		}
@@ -43,8 +42,7 @@ func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
 			return next(c)
 		}
 
-		ctx := context.Background()
-		binding, err := h.chatTopic.Get(ctx, chat.ID)
+		binding, err := h.chatTopic.Get(c, chat.ID)
 		if err != nil {
 			h.log.Warn("topic guard: get binding", zap.Error(err), zap.Int64("chat_id", chat.ID))
 			return next(c) // fail open: do not break the bot on a DB hiccup
@@ -54,15 +52,15 @@ func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
 			return next(c)
 		}
 
-		if int64(msg.ThreadID) == binding.TopicID {
-			c.Set(ctxTopicID, int(binding.TopicID))
+		threadID := h.forum.ThreadID(c)
+		if int64(threadID) == binding.TopicID {
 			return next(c)
 		}
 
 		// Outside the bound topic: do not handle, but nudge users only if it's a known command (throttled).
 		cmd := commandName(msg.Text)
 		if cmd != "" && h.botCommands[cmd] {
-			h.maybeSendTopicHint(chat, msg)
+			h.maybeSendTopicHint(c, chat.ID, threadID, msg.MessageID)
 		}
 		return nil
 	}
@@ -70,50 +68,26 @@ func (h *Handler) TopicGuard(next telebot.HandlerFunc) telebot.HandlerFunc {
 
 // maybeSendTopicHint replies to the offending message, in the same topic it was
 // posted in, at most once per hour per chat.
-func (h *Handler) maybeSendTopicHint(chat *telebot.Chat, msg *telebot.Message) {
+func (h *Handler) maybeSendTopicHint(ctx context.Context, chatID int64, threadID, messageID int) {
 	h.hintMu.Lock()
-	last := h.lastHintAt[chat.ID]
+	last := h.lastHintAt[chatID]
 	now := time.Now()
 	if now.Sub(last) < hintInterval {
 		h.hintMu.Unlock()
 		return
 	}
-	h.lastHintAt[chat.ID] = now
+	h.lastHintAt[chatID] = now
 	h.hintMu.Unlock()
 
-	_, err := h.bot.Send(chat,
-		"🃏 Я работаю только в выделенном топике этого чата. Пишите команды банкира туда.",
-		&telebot.SendOptions{ThreadID: msg.ThreadID, ReplyTo: msg},
-	)
+	_, err := tgforum.Send(ctx, h.api, tgforum.SendRequest{
+		ChatID:           chatID,
+		Text:             "🃏 Я работаю только в выделенном топике этого чата. Пишите команды банкира туда.",
+		MessageThreadID:  threadID,
+		ReplyToMessageID: messageID,
+	})
 	if err != nil {
-		h.log.Warn("send topic hint", zap.Error(err), zap.Int64("chat_id", chat.ID))
+		h.log.Warn("send topic hint", zap.Error(err), zap.Int64("chat_id", chatID))
 	}
-}
-
-// sendToChat sends a message to the current chat, routing it into the bound
-// topic when TopicGuard has resolved one for this update. Topic routing is
-// merged into the caller-supplied SendOptions/ReplyMarkup rather than
-// appended as a separate option, because telebot.extractOptions processes
-// options in order and a later *SendOptions overwrites ReplyMarkup set by an
-// earlier one — appending used to silently drop inline keyboards.
-func (h *Handler) sendToChat(c telebot.Context, what interface{}, opts ...interface{}) (*telebot.Message, error) {
-	tid, hasTopic := c.Get(ctxTopicID).(int)
-	if !hasTopic || tid == 0 {
-		return h.bot.Send(c.Chat(), what, opts...)
-	}
-
-	merged := &telebot.SendOptions{ThreadID: tid}
-	for _, opt := range opts {
-		switch v := opt.(type) {
-		case *telebot.ReplyMarkup:
-			merged.ReplyMarkup = v
-		case *telebot.SendOptions:
-			threadID := merged.ThreadID
-			merged = v
-			merged.ThreadID = threadID
-		}
-	}
-	return h.bot.Send(c.Chat(), what, merged)
 }
 
 // commandName extracts the leading "/command" token from message text,

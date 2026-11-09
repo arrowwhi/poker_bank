@@ -1,48 +1,64 @@
 package telegram
 
-import "gopkg.in/telebot.v3"
+import (
+	tg "github.com/arrowwhi/infrastructure/telegram"
+)
+
+// callbackPrefixes — префиксы data inline-кнопок, которые разбирает handleCallback.
+var callbackPrefixes = []string{"cancel", "endgame", "pa", "djoin", "drebuy", "dcashout", "settle"}
 
 // Register attaches all bot middleware and command handlers to the given bot instance.
-func (h *Handler) Register(b *telebot.Bot) {
-	b.Use(h.UpsertPlayer)
-	b.Use(h.TopicGuard)
+func (h *Handler) Register(b *tg.Bot) {
+	h.api = b.API()
 
-	b.Handle("/start", h.handleStart)
-	b.Handle("/help", h.handleHelp)
+	b.Use(h.forum.Middleware(), h.UpsertPlayer, h.TopicGuard)
 
-	// Topic binding (chat admins only)
-	b.Handle("/set_topic", h.handleSetTopic)
-	b.Handle("/unset_topic", h.handleUnsetTopic)
+	commands := map[string]func(*Context) error{
+		"start": h.handleStart,
+		"help":  h.handleHelp,
 
-	// Game lifecycle
-	b.Handle("/newgame", h.handleNewGame)
-	b.Handle("/endgame", h.handleEndGame)
-	b.Handle("/endgame_force", h.handleEndGameForce)
-	b.Handle("/cancel", h.handleCancel)
-	b.Handle("/admin_cancel", h.handleAdminCancel)
-	b.Handle("/transfer_dealer", h.handleTransferDealer)
+		// Topic binding (chat admins only)
+		"set_topic":   h.handleSetTopic,
+		"unset_topic": h.handleUnsetTopic,
 
-	// Player commands (require dealer confirmation)
-	b.Handle("/join", h.handleJoin)
-	b.Handle("/rebuy", h.handleRebuy)
+		// Game lifecycle
+		"newgame":         h.handleNewGame,
+		"endgame":         h.handleEndGame,
+		"endgame_force":   h.handleEndGameForce,
+		"cancel":          h.handleCancel,
+		"admin_cancel":    h.handleAdminCancel,
+		"transfer_dealer": h.handleTransferDealer,
 
-	// Dealer commands (with inline confirmation)
-	b.Handle("/dealer_join", h.handleDealerJoin)
-	b.Handle("/dealer_rebuy", h.handleDealerRebuy)
-	b.Handle("/dealer_cashout", h.handleDealerCashOut)
-	b.Handle("/cashout", h.handleCashOut)
-	b.Handle("/undo", h.handleUndo)
+		// Player commands (require dealer confirmation)
+		"join":  h.handleJoin,
+		"rebuy": h.handleRebuy,
 
-	// Read-only
-	b.Handle("/status", h.handleStatus)
-	b.Handle("/me", h.handleMe)
-	b.Handle("/history", h.handleHistory)
-	b.Handle("/game", h.handleGame)
-	b.Handle("/stats", h.handleStats)
+		// Dealer commands (with inline confirmation)
+		"dealer_join":    h.handleDealerJoin,
+		"dealer_rebuy":   h.handleDealerRebuy,
+		"dealer_cashout": h.handleDealerCashOut,
+		"cashout":        h.handleCashOut,
+		"undo":           h.handleUndo,
+
+		// Read-only
+		"status":  h.handleStatus,
+		"me":      h.handleMe,
+		"history": h.handleHistory,
+		"game":    h.handleGame,
+		"stats":   h.handleStats,
+	}
+	for name, fn := range commands {
+		// Без описания: меню команд бот не публикует, как и раньше.
+		b.Command(name, "", h.wrap(fn))
+	}
+
+	for _, prefix := range callbackPrefixes {
+		b.Callback(prefix, h.wrap(h.handleCallback))
+	}
 
 	// FSM: пошаговый ввод (например, /newgame без аргументов)
-	b.Handle(telebot.OnText, h.handleText)
+	b.Text(h.wrap(h.handleText))
 
-	// Inline button callbacks
-	b.Handle(telebot.OnCallback, h.handleCallback)
+	// Остальные обновления тоже проходят middleware (учёт игроков в players).
+	b.Default(func(*tg.Context) error { return nil })
 }
