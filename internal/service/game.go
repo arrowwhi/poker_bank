@@ -112,6 +112,17 @@ func (s *GameService) Finish(ctx context.Context, gameID int64, bankDelta int) (
 	return settlements, nil
 }
 
+// ListSettlements returns the transfer plan of a finished game.
+func (s *GameService) ListSettlements(ctx context.Context, gameID int64) ([]domain.Settlement, error) {
+	return s.settlements.ListByGame(ctx, gameID)
+}
+
+// MarkSettlementsByPlayer marks the player's transfers as paid (outgoing) and
+// received (incoming). Returns the number of changed transfers.
+func (s *GameService) MarkSettlementsByPlayer(ctx context.Context, gameID, tgID int64) (int64, error) {
+	return s.settlements.MarkByPlayer(ctx, gameID, tgID)
+}
+
 // GetGame retrieves a game by its primary key.
 func (s *GameService) GetGame(ctx context.Context, id int64) (*domain.Game, error) {
 	return s.games.GetByID(ctx, id)

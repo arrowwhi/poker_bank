@@ -75,6 +75,9 @@ type SettlementRepository interface {
 	InsertBulk(ctx context.Context, settlements []domain.Settlement) error
 	ListByGame(ctx context.Context, gameID int64) ([]domain.Settlement, error)
 	MarkPaid(ctx context.Context, id int64) error
+	// MarkByPlayer marks every unpaid outgoing settlement of the player as paid and
+	// every unreceived incoming one as received. Returns the number of changed rows.
+	MarkByPlayer(ctx context.Context, gameID, tgID int64) (int64, error)
 }
 
 // ChatTopicRepository defines persistence operations for chat-to-topic bindings.

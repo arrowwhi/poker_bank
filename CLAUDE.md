@@ -173,8 +173,10 @@ CREATE TABLE settlements (
   from_tg_id    BIGINT       NOT NULL REFERENCES players(telegram_user_id),
   to_tg_id      BIGINT       NOT NULL REFERENCES players(telegram_user_id),
   amount_rub    INTEGER      NOT NULL CHECK (amount_rub > 0),
-  is_paid       BOOLEAN      NOT NULL DEFAULT false,
-  paid_at       TIMESTAMPTZ
+  is_paid       BOOLEAN      NOT NULL DEFAULT false,   -- отправитель отметил «оплатил»
+  paid_at       TIMESTAMPTZ,
+  is_received   BOOLEAN      NOT NULL DEFAULT false,   -- получатель отметил «получил»
+  received_at   TIMESTAMPTZ
 );
 CREATE INDEX settlements_from ON settlements(from_tg_id) WHERE is_paid = false;
 CREATE INDEX settlements_game ON settlements(game_id);
@@ -324,7 +326,7 @@ COMMIT;
      На этом останавливаемся.
   2. Считается план `settlements` (см. §9).
   3. Транзакция из §6 — пишутся агрегаты, settlements, удаляется лог.
-  4. В чат публикуется план переводов с кнопкой «✅ Я заплатил» под каждой строкой.
+  4. В чат публикуется план переводов с одной кнопкой «✅ Я оплатил / получил» (см. §8.7).
 
 #### `/endgame_force`
 
@@ -434,7 +436,7 @@ COMMIT;
 
 - `pa:<pending_action_id>:yes|no` — подтверждение запроса (только дилер).
 - `cancel:<game_id>:yes|no` — подтверждение отмены игры (только дилер).
-- `paid:<settlement_id>` — отметка «оплачено». Жмёт **отправитель** перевода (`from_tg_id`).
+- `settle:<game_id>` — одна кнопка под планом переводов. Нажавший отмечается во всех своих переводах: исходящие → `is_paid=true`, входящие → `is_received=true`. В сообщении перед его именем появляется 🟢. Не участник переводов → «Вас нет в переводах»; повторное нажатие → «Уже отмечено». Когда все переводы оплачены и получены — кнопка убирается, добавляется «✅ Все расчёты закрыты».
 
 ---
 

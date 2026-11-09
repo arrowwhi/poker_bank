@@ -237,9 +237,9 @@ func (h *Handler) doEndGame(c telebot.Context, force bool) error {
 		return c.Reply("Ошибка при завершении игры.")
 	}
 
-	msg := h.buildEndGameMessage(ctx, game.ID, settlements)
-	if force && bank != 0 {
-		msg = fmt.Sprintf("⚠️ Расхождение %+d₽ распределено пропорционально.\n\n", bank) + msg
+	msg := h.buildEndGameMessage(ctx, game.ID, bank, settlements)
+	if markup := settleMarkup(game.ID, settlements); markup != nil {
+		return c.Reply(msg, markup)
 	}
 	return c.Reply(msg)
 }
@@ -979,6 +979,8 @@ func (h *Handler) handleCallback(c telebot.Context) error {
 		return h.handleDealerRebuyCallback(c, parts)
 	case "dcashout":
 		return h.handleDealerCashOutCallback(c, parts)
+	case "settle":
+		return h.handleSettleCallback(c, parts)
 	}
 	return c.Respond()
 }
@@ -1114,8 +1116,56 @@ func (h *Handler) handleEndGameCallback(c telebot.Context, parts []string) error
 		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка при завершении игры."})
 	}
 
-	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, settlements))
+	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, 0, settlements), settleMarkup(gameID, settlements))
 	return c.Respond()
+}
+
+// handleSettleCallback отмечает переводы нажавшего: исходящие — «оплачено»,
+// входящие — «получено». Формат data: settle:<game_id>
+func (h *Handler) handleSettleCallback(c telebot.Context, parts []string) error {
+	if len(parts) != 2 {
+		return c.Respond()
+	}
+	gameID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return c.Respond()
+	}
+
+	ctx := context.Background()
+	senderID := c.Sender().ID
+
+	game, err := h.game.GetGame(ctx, gameID)
+	if err != nil {
+		return c.Respond(&telebot.CallbackResponse{Text: "Игра не найдена."})
+	}
+	if game.Status != domain.GameStatusFinished {
+		return c.Respond(&telebot.CallbackResponse{Text: "Игра не завершена."})
+	}
+
+	changed, err := h.game.MarkSettlementsByPlayer(ctx, gameID, senderID)
+	if err != nil {
+		h.log.Error("отметка переводов", zap.Error(err), zap.Int64("game_id", gameID))
+		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка. Попробуй позже."})
+	}
+
+	settlements, err := h.game.ListSettlements(ctx, gameID)
+	if err != nil {
+		h.log.Error("список переводов", zap.Error(err), zap.Int64("game_id", gameID))
+		return c.Respond(&telebot.CallbackResponse{Text: "Ошибка. Попробуй позже."})
+	}
+
+	if changed == 0 {
+		for _, s := range settlements {
+			if s.FromTgID == senderID || s.ToTgID == senderID {
+				return c.Respond(&telebot.CallbackResponse{Text: "Уже отмечено."})
+			}
+		}
+		return c.Respond(&telebot.CallbackResponse{Text: "Вас нет в переводах этой игры."})
+	}
+
+	// Когда все расчёты закрыты, settleMarkup == nil и правка без клавиатуры убирает кнопку.
+	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, game.BankDeltaRub, settlements), settleMarkup(gameID, settlements))
+	return c.Respond(&telebot.CallbackResponse{Text: "Отмечено ✅"})
 }
 
 // handleDealerCashOutCallback выполняет cashout после подтверждения дилером.
@@ -1277,8 +1327,12 @@ func (h *Handler) buildActiveParticipantsList(ctx context.Context, participants 
 }
 
 // buildEndGameMessage формирует итоговое сообщение с планом переводов.
-func (h *Handler) buildEndGameMessage(ctx context.Context, gameID int64, settlements []domain.Settlement) string {
+// 🟢 перед именем отправителя — «оплатил», перед именем получателя — «получил».
+func (h *Handler) buildEndGameMessage(ctx context.Context, gameID int64, bankDelta int, settlements []domain.Settlement) string {
 	sb := strings.Builder{}
+	if bankDelta != 0 {
+		fmt.Fprintf(&sb, "⚠️ Расхождение %+d₽ распределено пропорционально.\n\n", bankDelta)
+	}
 	fmt.Fprintf(&sb, "🏁 Игра #%d завершена!\n", gameID)
 
 	if len(settlements) == 0 {
@@ -1290,12 +1344,45 @@ func (h *Handler) buildEndGameMessage(ctx context.Context, gameID int64, settlem
 	for _, s := range settlements {
 		from, _ := h.player.GetByID(ctx, s.FromTgID)
 		to, _ := h.player.GetByID(ctx, s.ToTgID)
-		fmt.Fprintf(&sb, "• %s → %s: %d₽\n",
-			formatPlayerByID(from, s.FromTgID),
-			formatPlayerByID(to, s.ToTgID),
+		fmt.Fprintf(&sb, "• %s%s → %s%s: %d₽\n",
+			settleMark(s.IsPaid), formatPlayerByID(from, s.FromTgID),
+			settleMark(s.IsReceived), formatPlayerByID(to, s.ToTgID),
 			s.AmountRub)
 	}
+	if allSettled(settlements) {
+		sb.WriteString("\n✅ Все расчёты закрыты.")
+	}
 	return sb.String()
+}
+
+func settleMark(done bool) string {
+	if done {
+		return "🟢"
+	}
+	return ""
+}
+
+// allSettled сообщает, что каждый перевод отмечен и отправителем, и получателем.
+func allSettled(settlements []domain.Settlement) bool {
+	for _, s := range settlements {
+		if !s.IsPaid || !s.IsReceived {
+			return false
+		}
+	}
+	return true
+}
+
+// settleMarkup возвращает кнопку отметки оплаты/получения или nil,
+// если переводов нет или все они уже закрыты.
+func settleMarkup(gameID int64, settlements []domain.Settlement) *telebot.ReplyMarkup {
+	if len(settlements) == 0 || allSettled(settlements) {
+		return nil
+	}
+	return &telebot.ReplyMarkup{
+		InlineKeyboard: [][]telebot.InlineButton{{
+			{Text: "✅ Я оплатил / получил", Data: fmt.Sprintf("settle:%d", gameID)},
+		}},
+	}
 }
 
 // --- форматирование ---

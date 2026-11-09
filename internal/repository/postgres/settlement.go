@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"poker_bank/internal/domain"
@@ -36,7 +37,7 @@ func (r *SettlementRepo) InsertBulk(ctx context.Context, settlements []domain.Se
 // ListByGame returns all settlements for the given game ordered by ID.
 func (r *SettlementRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.Settlement, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, game_id, from_tg_id, to_tg_id, amount_rub, is_paid, paid_at
+		SELECT id, game_id, from_tg_id, to_tg_id, amount_rub, is_paid, paid_at, is_received, received_at
 		FROM settlements WHERE game_id = $1 ORDER BY id
 	`, gameID)
 	if err != nil {
@@ -47,7 +48,7 @@ func (r *SettlementRepo) ListByGame(ctx context.Context, gameID int64) ([]domain
 	var ss []domain.Settlement
 	for rows.Next() {
 		var s domain.Settlement
-		if err = rows.Scan(&s.ID, &s.GameID, &s.FromTgID, &s.ToTgID, &s.AmountRub, &s.IsPaid, &s.PaidAt); err != nil {
+		if err = rows.Scan(&s.ID, &s.GameID, &s.FromTgID, &s.ToTgID, &s.AmountRub, &s.IsPaid, &s.PaidAt, &s.IsReceived, &s.ReceivedAt); err != nil {
 			return nil, fmt.Errorf("scan settlement: %w", err)
 		}
 		ss = append(ss, s)
@@ -65,4 +66,35 @@ func (r *SettlementRepo) MarkPaid(ctx context.Context, id int64) error {
 		return fmt.Errorf("mark settlement paid: %w", err)
 	}
 	return nil
+}
+
+// MarkByPlayer marks the player's outgoing settlements as paid and incoming ones
+// as received within a single transaction. Already-marked rows are left untouched,
+// so repeated calls are idempotent. Returns the number of changed rows.
+func (r *SettlementRepo) MarkByPlayer(ctx context.Context, gameID, tgID int64) (int64, error) {
+	var changed int64
+	err := pgx.BeginTxFunc(ctx, r.db, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE settlements SET is_paid = true, paid_at = now()
+			WHERE game_id = $1 AND from_tg_id = $2 AND NOT is_paid
+		`, gameID, tgID)
+		if err != nil {
+			return fmt.Errorf("mark settlements paid: %w", err)
+		}
+		changed += tag.RowsAffected()
+
+		tag, err = tx.Exec(ctx, `
+			UPDATE settlements SET is_received = true, received_at = now()
+			WHERE game_id = $1 AND to_tg_id = $2 AND NOT is_received
+		`, gameID, tgID)
+		if err != nil {
+			return fmt.Errorf("mark settlements received: %w", err)
+		}
+		changed += tag.RowsAffected()
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
 }
