@@ -669,7 +669,7 @@ webapp/embed.go              // go:embed all:dist (в git только dist/.git
 | `HTTP_PORT` | `8080` | API, Mini App, webhook |
 | `ADMIN_PORT` | `9090` | `/metrics`, `/ready`; пусто — выключен |
 | `APP_ENV` | `local` | окружение в логах и метриках |
-| `WEBAPP_SHORT_NAME` | — | short name Mini App из BotFather, для ссылок `t.me/<bot>/<app>` (пока не используется) |
+| `WEBAPP_SHORT_NAME` | `poker_bank` | short name Mini App из BotFather: бот ставит под сообщениями кнопки-ссылки `t.me/<bot>/<app>` (username бота берётся из `getMe`) |
 | `SHUTDOWN_TIMEOUT` | `15s` | остановка компонентов |
 
 ### 8.4. Docker и Coolify

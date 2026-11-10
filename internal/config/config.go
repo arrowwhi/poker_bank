@@ -46,7 +46,8 @@ type Config struct {
 	HTTPPort string
 	// AdminPort — служебный порт /metrics, /healthz, /ready; наружу не публикуется.
 	AdminPort string
-	// WebAppShortName — short name Mini App из BotFather (/newapp) для ссылок t.me/<bot>/<app>.
+	// WebAppShortName — short name Mini App из BotFather (/newapp): бот ставит под сообщениями
+	// кнопки-ссылки t.me/<bot>/<app>.
 	WebAppShortName string
 
 	ShutdownTimeout time.Duration
@@ -95,7 +96,7 @@ func Load(envFile string) (*Config, error) {
 		PublicURL:             strings.TrimSuffix(getenv("PUBLIC_URL", ""), "/"),
 		HTTPPort:              getenv("HTTP_PORT", "8080"),
 		AdminPort:             getenv("ADMIN_PORT", "9090"),
-		WebAppShortName:       getenv("WEBAPP_SHORT_NAME", ""),
+		WebAppShortName:       getenv("WEBAPP_SHORT_NAME", "poker_bank"),
 	}
 
 	timeout, err := time.ParseDuration(getenv("SHUTDOWN_TIMEOUT", "15s"))

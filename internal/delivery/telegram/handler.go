@@ -31,6 +31,10 @@ type Handler struct {
 	memberMu    sync.Mutex
 	memberCache map[[2]int64]memberCacheEntry
 
+	// webAppShortName и botUsername — из чего собирается ссылка на Mini App (webapp_link.go).
+	webAppShortName string
+	botUsername     func() string
+
 	// botCommands is a set of all commands handled by this bot
 	botCommands map[string]bool
 }
