@@ -285,7 +285,7 @@ func (a *api) listChats(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]chatDTO, 0, len(chats))
 	for _, c := range chats {
-		d := chatDTO{ID: c.ID, Title: b.chatTitle(ctx, c.ID)}
+		d := chatDTO{ID: c.ID, Title: b.chatTitle(ctx, c.ID), GamesCount: c.GamesCount, LastGameAt: c.LastGameAt}
 		d.MembersCount, _ = a.games.CountChatMembers(ctx, c.ID)
 		if g, err := a.games.GetActiveGame(ctx, c.ID); err == nil {
 			d.ActiveGame = &chatActiveGameDTO{ID: g.ID, Dealer: b.user(ctx, g.DealerTgID)}
