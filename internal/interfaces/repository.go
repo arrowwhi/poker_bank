@@ -55,6 +55,8 @@ type ParticipantRepository interface {
 	ListByGame(ctx context.Context, gameID int64) ([]domain.Participant, error)
 	ListActive(ctx context.Context, gameID int64) ([]domain.Participant, error)
 	SetActive(ctx context.Context, gameID int64, playerTgID int64, active bool) error
+	// Delete removes the participant row: used when the player's only buy-in is undone.
+	Delete(ctx context.Context, gameID int64, playerTgID int64) error
 }
 
 // PendingActionRepository defines persistence operations for pending actions.

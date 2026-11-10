@@ -76,10 +76,22 @@ export function NewGame({ chatId }: { chatId?: number }) {
   // «Назад» внутри мастера — на предыдущий шаг.
   useBackButton(step === 'params' ? () => setStep('chat') : step === 'confirm' ? () => setStep('params') : null);
 
+  // Профиль в сессии обновляется не при каждом действии: игру могли отменить или завершить
+  // (здесь, в чате, другим дилером), игрок мог сделать cash-out. Перед проверкой перечитываем.
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    let on = true;
+    reloadMe().catch(() => undefined).finally(() => { if (on) setFresh(true); });
+    return () => { on = false; };
+  }, [reloadMe]);
+
   // Правило «одна активная игра на игрока»: пока я в другой игре, создать новую нельзя.
   const mine = step !== 'done' ? me.active_game : null;
+  // «Вы уже в игре» по непроверенному профилю не показываем — ждём свежий.
+  const checking = !fresh && !!mine;
 
   useMainButton(
+    checking ? null :
     mine ? { text: 'Перейти к своей игре', onClick: () => nav.replace({ name: 'game', id: mine.id }) } :
     step === 'chat' ? { text: 'Далее', disabled: !chat, onClick: () => setStep('params') } :
     step === 'params' ? { text: 'Далее', disabled: !proportional, onClick: () => setStep('confirm') } :
@@ -88,6 +100,8 @@ export function NewGame({ chatId }: { chatId?: number }) {
   );
 
   if (chats.error) return <ErrorState error={chats.error} onRetry={chats.reload} />;
+
+  if (checking) return <Screen title="Новая игра"><Skeleton h={120} /></Screen>;
 
   if (mine) {
     return (
