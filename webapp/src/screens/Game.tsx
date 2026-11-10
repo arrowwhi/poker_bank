@@ -258,6 +258,7 @@ function PlayerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
 function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number; act: Act; busy: boolean }) {
   const nav = useNav();
   const confirm = useConfirm();
+  const { reloadMe } = useSession();
   const [picker, setPicker] = useState<PickMode | null>(null);
   const [actionFor, setActionFor] = useState<Participant | null>(null);
   const [cashoutFor, setCashoutFor] = useState<Participant | null>(null);
@@ -269,10 +270,15 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
   const mismatch = allOut && game.bank_rub !== 0;
   const last = [...game.ledger].reverse().find((e) => !e.is_void);
 
+  // Игра закрыта — в профиле сессии её больше нет: иначе «Новая игра» и главный экран
+  // продолжат считать, что я в игре.
+  const refreshMe = () => reloadMe().catch(() => undefined);
+
   const finish = async (force: boolean) => {
     try {
       const d = await api.endGame(game.id, force);
       haptic.success();
+      await refreshMe();
       if (d.status === 'cancelled') { nav.pop(); return; }
       nav.replace({ name: 'results', id: game.id });
     } catch (e) {
@@ -299,7 +305,7 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
   };
   const cancelGame = async () => {
     if (!(await confirm({ icon: '🚫', title: 'Отменить игру?', text: 'Итоги и переводы не будут созданы. Лог событий сохранится.', ok: 'Отменить игру', tone: 'danger' }))) return;
-    if (await act(() => api.cancelGame(game.id), 'Игра отменена')) nav.pop();
+    if (await act(() => api.cancelGame(game.id), 'Игра отменена')) { await refreshMe(); nav.pop(); }
   };
   const undo = async () => {
     if (!last) return;

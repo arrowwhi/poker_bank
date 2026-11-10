@@ -543,21 +543,29 @@ func (s *GameService) CreateGameIn(ctx context.Context, chatID, dealerID int64, 
 		BuyInRub: buyInRub, BuyInChips: buyInChips, RebuyRub: rebuyRub, RebuyChips: rebuyChips,
 		Status: domain.GameStatusActive, StartedAt: time.Now(),
 	}
-	id, err := s.NewGame(ctx, g)
+	// Игра и buy-in дилера — одной транзакцией: если buy-in не записался, в чате не
+	// остаётся активной игры, которую дилер не просил в таком виде.
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		id, err := s.games.Create(ctx, g)
+		if err != nil {
+			return err
+		}
+		g.ID = id
+		if dealerBuyIn {
+			return s.recordBuyIn(ctx, g, dealerID, dealerID)
+		}
+		return nil
+	})
 	if err != nil {
+		// Уникальный индекс games_one_active_per_chat ловит гонку двух /newgame.
 		if _, aErr := s.GetActiveGame(ctx, chatID); aErr == nil {
 			return nil, ErrGameAlreadyActive
 		}
 		return nil, err
 	}
-	g.ID = id
-
-	if dealerBuyIn {
-		if err := s.BuyIn(ctx, g, dealerID, dealerID); err != nil {
-			return g, err
-		}
-	}
-	return s.GameByID(ctx, id)
+	// Лист создаётся после коммита и сразу с актуальным состоянием (включая buy-in).
+	s.createSheetAsync(g.ID)
+	return s.GameByID(ctx, g.ID)
 }
 
 // ── чтение для Mini App ──
