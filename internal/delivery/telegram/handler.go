@@ -27,6 +27,10 @@ type Handler struct {
 	hintMu     sync.Mutex
 	lastHintAt map[int64]time.Time
 
+	// memberCache — ответы getChatMember для проверки доступа Mini App.
+	memberMu    sync.Mutex
+	memberCache map[[2]int64]memberCacheEntry
+
 	// botCommands is a set of all commands handled by this bot
 	botCommands map[string]bool
 }
@@ -42,14 +46,15 @@ func NewHandler(
 	log *zap.Logger,
 ) *Handler {
 	return &Handler{
-		forum:      forum,
-		game:       game,
-		player:     player,
-		pending:    pending,
-		fsm:        fsm,
-		chatTopic:  chatTopic,
-		log:        log,
-		lastHintAt: make(map[int64]time.Time),
+		forum:       forum,
+		game:        game,
+		player:      player,
+		pending:     pending,
+		fsm:         fsm,
+		chatTopic:   chatTopic,
+		log:         log,
+		lastHintAt:  make(map[int64]time.Time),
+		memberCache: make(map[[2]int64]memberCacheEntry),
 		botCommands: map[string]bool{
 			"/start":           true,
 			"/help":            true,

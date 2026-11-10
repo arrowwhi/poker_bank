@@ -97,3 +97,30 @@ func (r *SettlementRepo) MarkByPlayer(ctx context.Context, gameID, tgID int64) (
 	}
 	return changed, nil
 }
+
+// ListOpenByPlayer — незакрытые переводы игрока в завершённых играх: исходящие без отметки
+// «оплатил» и входящие без отметки «получил».
+func (r *SettlementRepo) ListOpenByPlayer(ctx context.Context, tgID int64) ([]domain.Settlement, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT s.id, s.game_id, s.from_tg_id, s.to_tg_id, s.amount_rub, s.is_paid, s.paid_at, s.is_received, s.received_at
+		FROM settlements s
+		JOIN games g ON g.id = s.game_id
+		WHERE g.status = 'finished'
+		  AND ((s.from_tg_id = $1 AND NOT s.is_paid) OR (s.to_tg_id = $1 AND NOT s.is_received))
+		ORDER BY g.ended_at DESC, s.id
+	`, tgID)
+	if err != nil {
+		return nil, fmt.Errorf("list open settlements: %w", err)
+	}
+	defer rows.Close()
+
+	var ss []domain.Settlement
+	for rows.Next() {
+		var s domain.Settlement
+		if err = rows.Scan(&s.ID, &s.GameID, &s.FromTgID, &s.ToTgID, &s.AmountRub, &s.IsPaid, &s.PaidAt, &s.IsReceived, &s.ReceivedAt); err != nil {
+			return nil, fmt.Errorf("scan settlement: %w", err)
+		}
+		ss = append(ss, s)
+	}
+	return ss, rows.Err()
+}

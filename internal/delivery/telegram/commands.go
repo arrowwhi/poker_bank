@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
 	"go.uber.org/zap"
@@ -237,11 +238,26 @@ func (h *Handler) doEndGame(c *Context, force bool) error {
 		return c.Reply("Ошибка при завершении игры.")
 	}
 
-	msg := h.buildEndGameMessage(ctx, game.ID, bank, settlements)
-	if markup := settleMarkup(game.ID, settlements); markup != nil {
-		return c.Reply(msg, markup)
+	h.closeGamePending(ctx, game.ID)
+	if stored, lErr := h.game.ListSettlements(ctx, game.ID); lErr == nil {
+		settlements = stored
 	}
-	return c.Reply(msg)
+	m, err := c.ReplyMessage(h.buildEndGameMessage(ctx, game.ID, bank, settlements), settleMarkup(game.ID, settlements))
+	if err != nil {
+		return err
+	}
+	h.rememberSettleMessage(ctx, game.ID, m.MessageID)
+	return nil
+}
+
+// closeGamePending закрывает висящие запросы завершённой игры и правит их сообщения.
+func (h *Handler) closeGamePending(ctx context.Context, gameID int64) {
+	cancelled, err := h.game.ClosePending(ctx, gameID)
+	if err != nil {
+		h.log.Warn("cancel pending of finished game", zap.Error(err), zap.Int64("game_id", gameID))
+		return
+	}
+	h.RequestsClosed(ctx, cancelled)
 }
 
 // handleCancel запрашивает подтверждение отмены игры у дилера.
@@ -264,7 +280,34 @@ func (h *Handler) handleCancel(c *Context) error {
 	return c.Reply("⚠️ Отменить игру? Данные сохранятся, переводы не рассчитываются.", markup)
 }
 
-func (h *Handler) handleAdminCancel(_ *Context) error { return nil }
+// handleAdminCancel — админ чата отменяет игру, если дилер бездействует больше 6 часов (ТЗ §8.1).
+func (h *Handler) handleAdminCancel(c *Context) error {
+	ctx := context.Background()
+
+	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
+	if errors.Is(err, service.ErrNoActiveGame) {
+		return c.Reply("❌ Нет активной игры.")
+	}
+	if err != nil {
+		return err
+	}
+	if !h.isChatAdmin(c) {
+		return c.Reply("❌ Команда доступна только администраторам чата.")
+	}
+
+	cancelled, last, err := h.game.AdminCancelGame(ctx, game, time.Now())
+	if errors.Is(err, service.ErrDealerNotIdle) {
+		wait := time.Until(last.Add(service.AdminIdleTimeout)).Round(time.Minute)
+		return c.Reply(fmt.Sprintf("⏳ Дилер был активен %s. Отменить игру можно через 6 ч после его последнего действия (осталось ~%d ч %02d мин).",
+			last.Format("02.01 15:04"), int(wait.Hours()), int(wait.Minutes())%60))
+	}
+	if err != nil {
+		return err
+	}
+	h.RequestsClosed(ctx, cancelled)
+
+	return c.Reply(fmt.Sprintf("🚫 Игра #%d отменена администратором: дилер не отвечал больше 6 часов.", game.ID))
+}
 
 // handleTransferDealer передаёт роль дилера активному участнику. Только текущий дилер.
 // Синтаксис: /transfer_dealer @username
@@ -307,58 +350,20 @@ func (h *Handler) handleTransferDealer(c *Context) error {
 
 // handleJoin создаёт запрос на вход в игру, ожидающий подтверждения дилера.
 func (h *Handler) handleJoin(c *Context) error {
-	ctx := context.Background()
-	chatID := c.Chat().ID
-	senderID := c.Sender().ID
-
-	game, err := h.game.GetActiveGame(ctx, chatID)
-	if errors.Is(err, service.ErrNoActiveGame) {
-		return c.Reply("❌ Нет активной игры.")
-	}
-	if err != nil {
-		return err
-	}
-
-	// Проверяем статус участника в текущей игре
-	p, err := h.game.GetParticipant(ctx, game.ID, senderID)
-	if err == nil && p.IsActive {
-		return c.Reply("❌ Вы уже в игре.")
-	}
-
-	// Проверяем, нет ли уже pending-запроса JOIN
-	_, err = h.pending.GetPending(ctx, game.ID, senderID, domain.ActionJoin)
-	if err == nil {
-		return c.Reply("❌ У вас уже есть запрос на вход, ожидающий подтверждения.")
-	}
-
-	paID, err := h.pending.Create(ctx, &domain.PendingAction{
-		GameID:        game.ID,
-		ActionType:    domain.ActionJoin,
-		RequesterTgID: senderID,
-		TargetTgID:    senderID,
-		Payload:       map[string]any{},
-		ChatID:        chatID,
-	})
-	if err != nil {
-		h.log.Error("создание pending JOIN", zap.Error(err))
-		return c.Reply("Ошибка при создании запроса.")
-	}
-
-	markup := pendingMarkup(paID)
-	err = c.Send(fmt.Sprintf(
-		"🃏 %s просит JOIN (buy-in: %d₽ → %d фишек). Подтвердить?",
-		playerName(c.Sender(), senderID), game.BuyInRub, game.BuyInChips,
-	), markup)
-	return err
+	return h.requestFromChat(c, domain.ActionJoin, 0)
 }
 
 // handleRebuy создаёт запрос на rebuy, ожидающий подтверждения дилера.
 func (h *Handler) handleRebuy(c *Context) error {
-	ctx := context.Background()
-	chatID := c.Chat().ID
-	senderID := c.Sender().ID
+	return h.requestFromChat(c, domain.ActionRebuy, 0)
+}
 
-	game, err := h.game.GetActiveGame(ctx, chatID)
+// requestFromChat — общий путь /join, /rebuy, /cashout: запрос дилеру (или сразу запись,
+// если просит сам дилер) и сообщение с кнопками, id которого сохраняется.
+func (h *Handler) requestFromChat(c *Context, t domain.ActionType, chips int) error {
+	ctx := context.Background()
+
+	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
 	if errors.Is(err, service.ErrNoActiveGame) {
 		return c.Reply("❌ Нет активной игры.")
 	}
@@ -366,37 +371,42 @@ func (h *Handler) handleRebuy(c *Context) error {
 		return err
 	}
 
-	// Только активный участник может rebuy
-	p, err := h.game.GetParticipant(ctx, game.ID, senderID)
-	if err != nil || !p.IsActive {
+	res, err := h.game.CreateRequest(ctx, game, c.Sender().ID, t, chips)
+	switch {
+	case errors.Is(err, service.ErrAlreadyInGame):
+		return c.Reply("❌ Вы уже в игре.")
+	case errors.Is(err, service.ErrNotInGame):
 		return c.Reply("❌ Вы не в игре. Сначала используйте /join.")
-	}
-
-	// Проверяем, нет ли уже pending-запроса REBUY
-	_, err = h.pending.GetPending(ctx, game.ID, senderID, domain.ActionRebuy)
-	if err == nil {
-		return c.Reply("❌ У вас уже есть запрос на rebuy, ожидающий подтверждения.")
-	}
-
-	paID, err := h.pending.Create(ctx, &domain.PendingAction{
-		GameID:        game.ID,
-		ActionType:    domain.ActionRebuy,
-		RequesterTgID: senderID,
-		TargetTgID:    senderID,
-		Payload:       map[string]any{},
-		ChatID:        chatID,
-	})
-	if err != nil {
-		h.log.Error("создание pending REBUY", zap.Error(err))
+	case errors.Is(err, service.ErrPendingExists):
+		return c.Reply("❌ У вас уже есть такой запрос, ожидающий подтверждения.")
+	case errors.Is(err, service.ErrInvalidChipsAmount):
+		return c.Reply(fmt.Sprintf("❌ %d фишек даёт нецелое число рублей. Курс: %s₽/фишку.",
+			chips, formatRate(game.BuyInRub, game.BuyInChips)))
+	case err != nil:
+		h.log.Error("создание запроса", zap.Error(err), zap.String("type", string(t)))
 		return c.Reply("Ошибка при создании запроса.")
 	}
 
-	markup := pendingMarkup(paID)
-	err = c.Send(fmt.Sprintf(
-		"🃏 %s просит REBUY (%d₽ → %d фишек). Подтвердить?",
-		playerName(c.Sender(), senderID), game.RebuyRub, game.RebuyChips,
-	), markup)
-	return err
+	if res.Applied {
+		h.RequestsClosed(ctx, res.Cancelled)
+		return c.Reply(h.appliedText(ctx, game, res.Action))
+	}
+	h.RequestCreated(ctx, game, res.Action)
+	return nil
+}
+
+// appliedText — сообщение о действии, записанном без подтверждения (дилер сам себе).
+func (h *Handler) appliedText(ctx context.Context, g *domain.Game, pa *domain.PendingAction) string {
+	who := h.name(ctx, pa.TargetTgID)
+	rub, chips := service.RequestAmount(g, pa)
+	switch pa.ActionType {
+	case domain.ActionJoin:
+		return fmt.Sprintf("✅ %s в игре (buy-in: %d₽ → %d фишек).", who, rub, chips)
+	case domain.ActionRebuy:
+		return fmt.Sprintf("✅ %s rebuy (%d₽ → %d фишек).", who, rub, chips)
+	default:
+		return fmt.Sprintf("💸 %s вышел: %d фишек = %d₽.", who, chips, rub)
+	}
 }
 
 // handleDealerJoin запрашивает у дилера подтверждение добавления игрока.
@@ -485,64 +495,15 @@ func (h *Handler) handleDealerRebuy(c *Context) error {
 // handleCashOut создаёт запрос на выход из игры, ожидающий подтверждения дилера.
 // Синтаксис: /cashout <chips>
 func (h *Handler) handleCashOut(c *Context) error {
-	ctx := context.Background()
-	senderID := c.Sender().ID
-
-	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
-	if errors.Is(err, service.ErrNoActiveGame) {
-		return c.Reply("❌ Нет активной игры.")
-	}
-	if err != nil {
-		return err
-	}
-
-	p, err := h.game.GetParticipant(ctx, game.ID, senderID)
-	if err != nil || !p.IsActive {
-		return c.Reply("❌ Вы не являетесь активным участником игры.")
-	}
-
 	args := c.Args()
 	if len(args) != 1 {
 		return c.Reply("Использование: /cashout <chips>")
 	}
-
 	chips, err := parseNonNegativeInt(args[0])
 	if err != nil {
 		return c.Reply("❌ Количество фишек должно быть целым числом (0 или больше).")
 	}
-
-	amountRub, ok := game.ChipsToRub(chips)
-	if !ok {
-		return c.Reply(fmt.Sprintf(
-			"❌ %d фишек даёт нецелое число рублей. Курс: %s₽/фишку.",
-			chips, formatRate(game.BuyInRub, game.BuyInChips),
-		))
-	}
-
-	_, err = h.pending.GetPending(ctx, game.ID, senderID, domain.ActionCashOut)
-	if err == nil {
-		return c.Reply("❌ У вас уже есть запрос на выход, ожидающий подтверждения.")
-	}
-
-	paID, err := h.pending.Create(ctx, &domain.PendingAction{
-		GameID:        game.ID,
-		ActionType:    domain.ActionCashOut,
-		RequesterTgID: senderID,
-		TargetTgID:    senderID,
-		Payload:       map[string]any{"chips": chips},
-		ChatID:        c.Chat().ID,
-	})
-	if err != nil {
-		h.log.Error("создание pending CASHOUT", zap.Error(err))
-		return c.Reply("Ошибка при создании запроса.")
-	}
-
-	markup := pendingMarkup(paID)
-	err = c.Send(fmt.Sprintf(
-		"💸 %s хочет выйти: %d фишек = %d₽. Подтвердить?",
-		playerName(c.Sender(), senderID), chips, amountRub,
-	), markup)
-	return err
+	return h.requestFromChat(c, domain.ActionCashOut, chips)
 }
 
 // handleDealerCashOut делает cashout за игрока с подтверждением дилера.
@@ -880,7 +841,104 @@ func (h *Handler) handleHistory(c *Context) error {
 	return c.Reply(sb.String())
 }
 
-func (h *Handler) handleGame(_ *Context) error { return nil }
+// gameLogLimit — сколько последних событий ledger показывать в /game (лимит сообщения Telegram).
+const gameLogLimit = 40
+
+// handleGame показывает детали игры этого чата: курс, итоги, переводы и лог событий (ТЗ §8.4).
+// Синтаксис: /game <id>
+func (h *Handler) handleGame(c *Context) error {
+	ctx := context.Background()
+
+	args := c.Args()
+	if len(args) != 1 {
+		return c.Reply("Использование: /game <id>  (номер игры есть в /history)")
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(args[0], "#"), 10, 64)
+	if err != nil || id <= 0 {
+		return c.Reply("❌ Номер игры должен быть положительным числом.")
+	}
+
+	g, err := h.game.GameByID(ctx, id)
+	// Игры других чатов не показываем, чтобы не раскрывать чужие данные.
+	if errors.Is(err, service.ErrNotFound) || (err == nil && g.ChatID != c.Chat().ID) {
+		return c.Reply(fmt.Sprintf("❌ Игра #%d в этом чате не найдена.", id))
+	}
+	if err != nil {
+		return err
+	}
+
+	name := func(tgID int64) string {
+		p, _ := h.player.GetByID(ctx, tgID)
+		return formatPlayerByID(p, tgID)
+	}
+
+	sb := strings.Builder{}
+	statusText := map[domain.GameStatus]string{
+		domain.GameStatusActive:    "🟢 идёт",
+		domain.GameStatusFinished:  "🏁 завершена",
+		domain.GameStatusCancelled: "🚫 отменена",
+	}[g.Status]
+	fmt.Fprintf(&sb, "🃏 Игра #%d — %s\n", g.ID, statusText)
+	fmt.Fprintf(&sb, "Дилер: %s\n", name(g.DealerTgID))
+	fmt.Fprintf(&sb, "Buy-in: %d₽ → %d фишек, rebuy: %d₽ → %d фишек\n", g.BuyInRub, g.BuyInChips, g.RebuyRub, g.RebuyChips)
+	fmt.Fprintf(&sb, "Начало: %s", g.StartedAt.Format("02.01.2006 15:04"))
+	if g.EndedAt != nil {
+		fmt.Fprintf(&sb, ", конец: %s", g.EndedAt.Format("02.01.2006 15:04"))
+	}
+	sb.WriteByte('\n')
+	if g.BankDeltaRub != 0 {
+		fmt.Fprintf(&sb, "⚠️ Расхождение банка: %+d₽\n", g.BankDeltaRub)
+	}
+
+	if g.Status == domain.GameStatusFinished {
+		results, err := h.game.GetResultsByGame(ctx, g.ID)
+		if err != nil {
+			return err
+		}
+		if len(results) > 0 {
+			sb.WriteString("\n📊 Итоги:\n")
+			for _, r := range results {
+				fmt.Fprintf(&sb, "• %s: внёс %d₽, вывел %d₽ → %+d₽\n", name(r.PlayerTgID), r.TotalInRub, r.TotalOutRub, r.NetRub)
+			}
+		}
+		settlements, err := h.game.ListSettlements(ctx, g.ID)
+		if err != nil {
+			return err
+		}
+		if len(settlements) > 0 {
+			sb.WriteString("\n💸 Переводы:\n")
+			for _, s := range settlements {
+				fmt.Fprintf(&sb, "• %s%s → %s%s: %d₽\n",
+					settleMark(s.IsPaid), name(s.FromTgID), settleMark(s.IsReceived), name(s.ToTgID), s.AmountRub)
+			}
+		}
+	}
+
+	entries, err := h.game.GetLedger(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		sb.WriteString("\nСобытий нет.")
+		return c.Reply(sb.String())
+	}
+	sb.WriteString("\n📜 События:\n")
+	if len(entries) > gameLogLimit {
+		fmt.Fprintf(&sb, "… ещё %d ранних событий скрыто\n", len(entries)-gameLogLimit)
+		entries = entries[len(entries)-gameLogLimit:]
+	}
+	for _, e := range entries {
+		line := fmt.Sprintf("%s %s %s %d₽ / %d фишек",
+			e.CreatedAt.Format("15:04"), name(e.PlayerTgID), e.Type, e.AmountRub, e.AmountChips)
+		if e.IsVoid {
+			line = "↩️ " + line + " (отменено)"
+		}
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+
+	return c.Reply(sb.String())
+}
 
 // handleStats показывает статистику чата или конкретного игрока.
 // /stats          — топ игроков чата по суммарному net_rub
@@ -980,7 +1038,7 @@ func (h *Handler) handleCallback(c *Context) error {
 	return c.Respond()
 }
 
-// handlePendingCallback обрабатывает подтверждение/отклонение JOIN или REBUY.
+// handlePendingCallback обрабатывает подтверждение/отклонение запроса игрока.
 func (h *Handler) handlePendingCallback(c *Context, parts []string) error {
 	if len(parts) != 3 {
 		return c.Respond()
@@ -991,62 +1049,29 @@ func (h *Handler) handlePendingCallback(c *Context, parts []string) error {
 	}
 
 	ctx := context.Background()
-	senderID := c.Sender().ID
-
-	pa, err := h.pending.GetByID(ctx, paID)
-	if err != nil {
+	res, err := h.game.ResolveRequest(ctx, paID, c.Sender().ID, parts[2] == "yes")
+	switch {
+	case errors.Is(err, service.ErrAlreadyResolved):
+		// Идемпотентность: решён раньше (в чате или в Mini App) — просто обновляем сообщение.
+		_ = c.Edit(h.resolvedText(ctx, res.Action))
+		return c.Respond(&CallbackResponse{Text: "Запрос уже обработан."})
+	case errors.Is(err, service.ErrNotFound):
 		return c.Respond(&CallbackResponse{Text: "Запрос не найден."})
-	}
-
-	// Идемпотентность: если уже обработан — просто обновляем сообщение
-	if pa.Status != domain.PendingStatusPending {
-		_ = c.Edit(pendingResolvedText(pa))
-		return c.Respond(&CallbackResponse{Text: "Запрос уже обработан."})
-	}
-
-	// Только дилер может подтверждать
-	game, err := h.game.GetGame(ctx, pa.GameID)
-	if err != nil {
-		return c.Respond(&CallbackResponse{Text: "Игра не найдена."})
-	}
-	if game.DealerTgID != senderID {
+	case errors.Is(err, service.ErrNotDealer):
 		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать запросы."})
+	case errors.Is(err, service.ErrGameNotActive):
+		return c.Respond(&CallbackResponse{Text: "Игра уже не активна."})
+	case errors.Is(err, service.ErrAlreadyInGame):
+		return c.Respond(&CallbackResponse{Text: "Игрок уже в игре.", ShowAlert: true})
+	case errors.Is(err, service.ErrNotInGame):
+		return c.Respond(&CallbackResponse{Text: "Игрок уже не в игре.", ShowAlert: true})
+	case err != nil:
+		h.log.Error("решение по запросу", zap.Error(err), zap.Int64("pending_id", paID))
+		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
-	newStatus := domain.PendingStatusRejected
-	if parts[2] == "yes" {
-		newStatus = domain.PendingStatusConfirmed
-	}
-
-	resolved, err := h.pending.Resolve(ctx, paID, newStatus, senderID)
-	if err != nil {
-		// 0 строк — кто-то успел раньше (гонка двойного клика)
-		return c.Respond(&CallbackResponse{Text: "Запрос уже обработан."})
-	}
-
-	// Выполняем действие при подтверждении
-	if resolved.Status == domain.PendingStatusConfirmed {
-		switch resolved.ActionType {
-		case domain.ActionJoin:
-			if err := h.game.BuyIn(ctx, game, resolved.TargetTgID, senderID); err != nil {
-				h.log.Error("buy-in после подтверждения", zap.Error(err))
-			}
-		case domain.ActionRebuy:
-			if err := h.game.Rebuy(ctx, game, resolved.TargetTgID, senderID); err != nil {
-				h.log.Error("rebuy после подтверждения", zap.Error(err))
-			}
-		case domain.ActionCashOut:
-			chips := int(resolved.Payload["chips"].(float64))
-			cancelled, err := h.game.CashOut(ctx, game, resolved.TargetTgID, chips, senderID)
-			if err != nil {
-				h.log.Error("cashout после подтверждения", zap.Error(err))
-			}
-			h.editCancelledPending(cancelled)
-		}
-	}
-
-	target, _ := h.player.GetByID(ctx, resolved.TargetTgID)
-	_ = c.Edit(pendingResolvedText(resolved) + " — " + formatPlayerByID(target, resolved.TargetTgID))
+	h.RequestsClosed(ctx, res.Cancelled)
+	_ = c.Edit(h.resolvedText(ctx, res.Action))
 	return c.Respond()
 }
 
@@ -1111,7 +1136,14 @@ func (h *Handler) handleEndGameCallback(c *Context, parts []string) error {
 		return c.Respond(&CallbackResponse{Text: "Ошибка при завершении игры."})
 	}
 
+	h.closeGamePending(ctx, gameID)
+	if stored, lErr := h.game.ListSettlements(ctx, gameID); lErr == nil {
+		settlements = stored
+	}
 	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, 0, settlements), settleMarkup(gameID, settlements))
+	if m := c.Callback().Message; m != nil {
+		h.rememberSettleMessage(ctx, gameID, m.MessageID)
+	}
 	return c.Respond()
 }
 
@@ -1281,10 +1313,12 @@ func (h *Handler) handleCancelCallback(c *Context, parts []string) error {
 		return c.Respond()
 	}
 
-	if err := h.game.Cancel(ctx, gameID); err != nil {
+	cancelled, err := h.game.CancelGame(ctx, game, c.Sender().ID)
+	if err != nil {
 		h.log.Error("отмена игры", zap.Error(err))
 		return c.Respond(&CallbackResponse{Text: "Ошибка при отмене игры."})
 	}
+	h.RequestsClosed(ctx, cancelled)
 
 	_ = c.Edit(fmt.Sprintf("🚫 Игра #%d отменена.", gameID))
 	return c.Respond()
@@ -1439,22 +1473,9 @@ func pendingResolvedText(pa *domain.PendingAction) string {
 	}
 }
 
-// editCancelledPending редактирует Telegram-сообщения для отменённых pending-действий,
-// убирая инлайн-клавиатуру и добавляя пометку об отмене.
+// editCancelledPending редактирует сообщения отменённых запросов (убирает кнопки).
 func (h *Handler) editCancelledPending(cancelled []domain.PendingAction) {
-	for _, pa := range cancelled {
-		if pa.MessageID == nil {
-			continue
-		}
-		err := h.api.EditMessageText(context.Background(), tg.EditMessageTextRequest{
-			ChatID:    pa.ChatID,
-			MessageID: int(*pa.MessageID),
-			Text:      pendingResolvedText(&pa),
-		})
-		if err != nil && !tg.IsMessageNotModified(err) {
-			h.log.Warn("edit cancelled pending", zap.Error(err), zap.Int64("pending_id", pa.ID))
-		}
-	}
+	h.RequestsClosed(context.Background(), cancelled)
 }
 
 func parsePositiveInt(s string) (int, error) {

@@ -25,8 +25,10 @@ import (
 type Deps struct {
 	Games   *service.GameService
 	Players *service.PlayerService
-	Log     *zap.Logger
-	Health  *health.Registry
+	// Notifier отражает действия из Mini App в чате игры.
+	Notifier Notifier
+	Log      *zap.Logger
+	Health   *health.Registry
 	// WebAssets — собранный Mini App; nil — только API.
 	WebAssets fs.FS
 	// TelegramWebhook монтируется на WebhookPath только в режиме webhook.
@@ -66,11 +68,11 @@ func New(d Deps) (*httpserver.Server, error) {
 		r.Method(http.MethodPost, d.WebhookPath, d.TelegramWebhook)
 	}
 
-	h := &handlers{games: d.Games, log: d.Log}
+	a := &api{games: d.Games, players: d.Players, notifier: d.Notifier, log: d.Log}
 
-	r.Route("/api", func(api chi.Router) {
-		api.Use(TelegramAuth(d.BotToken, upsertPlayer(d.Players, d.Log)))
-		api.Get("/me", h.me)
+	r.Route("/api", func(r chi.Router) {
+		r.Use(TelegramAuth(d.BotToken, upsertPlayer(d.Players, d.Log)))
+		a.routes(r)
 	})
 
 	if d.WebAssets != nil {
@@ -92,62 +94,6 @@ func upsertPlayer(players *service.PlayerService, log *zap.Logger) func(context.
 			log.Warn("upsert player from mini app", zap.Error(err), zap.Int64("tg_id", id.TelegramID))
 		}
 	}
-}
-
-type handlers struct {
-	games *service.GameService
-	log   *zap.Logger
-}
-
-type meResponse struct {
-	User        userDTO   `json:"user"`
-	StartParam  string    `json:"start_param,omitempty"`
-	ActiveGames []gameDTO `json:"active_games"`
-}
-
-type userDTO struct {
-	Username  string `json:"username,omitempty"`
-	FirstName string `json:"first_name"`
-	ID        int64  `json:"id"`
-}
-
-type gameDTO struct {
-	StartedAt  time.Time `json:"started_at"`
-	ID         int64     `json:"id"`
-	ChatID     int64     `json:"chat_id"`
-	DealerID   int64     `json:"dealer_id"`
-	BuyInRub   int       `json:"buy_in_rub"`
-	BuyInChips int       `json:"buy_in_chips"`
-	RebuyRub   int       `json:"rebuy_rub"`
-	RebuyChips int       `json:"rebuy_chips"`
-	IsDealer   bool      `json:"is_dealer"`
-}
-
-// me — кто я и в каких активных играх участвую (стартовый экран Mini App).
-func (h *handlers) me(w http.ResponseWriter, r *http.Request) {
-	id, _ := IdentityFrom(r.Context())
-
-	games, err := h.games.ListActiveGamesOfPlayer(r.Context(), id.TelegramID)
-	if err != nil {
-		h.log.Error("list active games of player", zap.Error(err), zap.Int64("tg_id", id.TelegramID))
-		writeError(w, http.StatusInternalServerError, "internal", "Что-то пошло не так")
-		return
-	}
-
-	resp := meResponse{
-		User:        userDTO{ID: id.TelegramID, Username: id.Username, FirstName: id.FirstName},
-		StartParam:  id.StartParam,
-		ActiveGames: make([]gameDTO, 0, len(games)),
-	}
-	for _, g := range games {
-		resp.ActiveGames = append(resp.ActiveGames, gameDTO{
-			ID: g.ID, ChatID: g.ChatID, DealerID: g.DealerTgID, StartedAt: g.StartedAt,
-			BuyInRub: g.BuyInRub, BuyInChips: g.BuyInChips, RebuyRub: g.RebuyRub, RebuyChips: g.RebuyChips,
-			IsDealer: g.DealerTgID == id.TelegramID,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

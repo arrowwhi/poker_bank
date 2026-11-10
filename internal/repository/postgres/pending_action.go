@@ -147,15 +147,86 @@ func (r *PendingActionRepo) CancelByPlayer(ctx context.Context, gameID int64, pl
 	return result, rows.Err()
 }
 
-// ExpireOlderThan marks all still-pending actions older than olderThan as expired and returns the count.
-func (r *PendingActionRepo) ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error) {
-	tag, err := r.db.Exec(ctx, `
+// ExpireOlderThan marks all still-pending actions older than olderThan as expired and returns them
+// (их сообщения в чате нужно поправить).
+func (r *PendingActionRepo) ExpireOlderThan(ctx context.Context, olderThan time.Duration) ([]domain.PendingAction, error) {
+	return r.queryList(ctx, `
 		UPDATE pending_actions
 		SET status = 'expired', resolved_at = now()
 		WHERE status = 'pending' AND created_at < now() - $1::interval
-	`, olderThan.String())
+		RETURNING `+pendingCols, olderThan.String())
+}
+
+const pendingCols = `id, game_id, action_type, requester_tg_id, target_tg_id, payload,
+		          status, chat_id, message_id, created_at, resolved_at, resolved_by_tg_id`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPending(row rowScanner) (domain.PendingAction, error) {
+	var a domain.PendingAction
+	err := row.Scan(
+		&a.ID, &a.GameID, &a.ActionType, &a.RequesterTgID, &a.TargetTgID, &a.Payload,
+		&a.Status, &a.ChatID, &a.MessageID, &a.CreatedAt, &a.ResolvedAt, &a.ResolvedByTgID,
+	)
+	return a, err
+}
+
+func (r *PendingActionRepo) queryList(ctx context.Context, query string, args ...any) ([]domain.PendingAction, error) {
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("expire pending actions: %w", err)
+		return nil, fmt.Errorf("query pending actions: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	defer rows.Close()
+
+	var result []domain.PendingAction
+	for rows.Next() {
+		a, err := scanPending(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan pending action: %w", err)
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+// SetMessageID запоминает сообщение в чате с кнопками запроса.
+func (r *PendingActionRepo) SetMessageID(ctx context.Context, id, messageID int64) error {
+	if _, err := r.db.Exec(ctx, `UPDATE pending_actions SET message_id = $1 WHERE id = $2`, messageID, id); err != nil {
+		return fmt.Errorf("set pending message id: %w", err)
+	}
+	return nil
+}
+
+// ListByTarget — последние запросы игрока в игре в любом статусе, новые первыми.
+func (r *PendingActionRepo) ListByTarget(ctx context.Context, gameID, targetTgID int64, limit int) ([]domain.PendingAction, error) {
+	return r.queryList(ctx, `
+		SELECT `+pendingCols+`
+		FROM pending_actions
+		WHERE game_id = $1 AND target_tg_id = $2
+		ORDER BY created_at DESC, id DESC
+		LIMIT $3`, gameID, targetTgID, limit)
+}
+
+// CancelOne отзывает запрос, если он ещё ждёт решения.
+func (r *PendingActionRepo) CancelOne(ctx context.Context, id, byTgID int64) (*domain.PendingAction, error) {
+	a, err := scanPending(r.db.QueryRow(ctx, `
+		UPDATE pending_actions
+		SET status = 'cancelled', resolved_at = now(), resolved_by_tg_id = $2
+		WHERE id = $1 AND status = 'pending'
+		RETURNING `+pendingCols, id, byTgID))
+	if err != nil {
+		return nil, fmt.Errorf("cancel pending action: %w", err)
+	}
+	return &a, nil
+}
+
+// CancelByGame отменяет все висящие запросы игры (игра завершена или отменена).
+func (r *PendingActionRepo) CancelByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error) {
+	return r.queryList(ctx, `
+		UPDATE pending_actions
+		SET status = 'cancelled', resolved_at = now()
+		WHERE game_id = $1 AND status = 'pending'
+		RETURNING `+pendingCols, gameID)
 }

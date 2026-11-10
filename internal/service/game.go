@@ -19,6 +19,8 @@ type GameService struct {
 	results      interfaces.GameResultRepository
 	settlements  interfaces.SettlementRepository
 	pending      interfaces.PendingActionRepository
+	chats        interfaces.ChatRepository
+	tx           interfaces.TxManager
 	exporter     interfaces.SheetsExporter
 	log          *zap.Logger
 }
@@ -31,6 +33,8 @@ func NewGameService(
 	results interfaces.GameResultRepository,
 	settlements interfaces.SettlementRepository,
 	pending interfaces.PendingActionRepository,
+	chats interfaces.ChatRepository,
+	tx interfaces.TxManager,
 	exporter interfaces.SheetsExporter,
 	log *zap.Logger,
 ) *GameService {
@@ -41,6 +45,8 @@ func NewGameService(
 		results:      results,
 		settlements:  settlements,
 		pending:      pending,
+		chats:        chats,
+		tx:           tx,
 		exporter:     exporter,
 		log:          log,
 	}

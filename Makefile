@@ -14,10 +14,10 @@ build: ## Собрать бинарник локально
 	go build -o ./tmp/bot ./cmd/poker-bank
 
 migrate: ## Применить все миграции через контейнер
-	$(COMPOSE) run --rm migrate up
+	$(COMPOSE) --profile tools run --rm migrate up
 
 migrate-down: ## Откатить последнюю миграцию
-	$(COMPOSE) run --rm migrate down
+	$(COMPOSE) --profile tools run --rm migrate down
 
 lint: ## Запустить golangci-lint
 	golangci-lint run ./...

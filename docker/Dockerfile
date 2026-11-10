@@ -4,6 +4,12 @@ WORKDIR /web
 COPY webapp/package.json webapp/package-lock.json ./
 RUN npm ci
 COPY webapp/ ./
+# Ссылки «Добавить бота в группу» и «Ссылка на игру» в Mini App. Пустые — кнопки скрыты.
+# В Coolify задаются как build-переменные (Build Variable).
+ARG VITE_BOT_USERNAME=""
+ARG VITE_APP_SHORT_NAME=""
+ENV VITE_BOT_USERNAME=$VITE_BOT_USERNAME \
+    VITE_APP_SHORT_NAME=$VITE_APP_SHORT_NAME
 RUN npm run build
 
 FROM golang:1.26-alpine AS builder

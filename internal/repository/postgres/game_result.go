@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
@@ -116,4 +117,65 @@ func scanGameResults(rows interface {
 		results = append(results, res)
 	}
 	return results, rows.Err()
+}
+
+// ListHistory — результаты игрока в завершённых играх, новые первыми. chatID = 0 — по всем группам.
+func (r *GameResultRepo) ListHistory(ctx context.Context, playerTgID, chatID int64) ([]domain.PlayerGameResult, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT gr.game_id, gr.player_tg_id, gr.buy_in_count, gr.rebuy_count,
+		       gr.total_in_rub, gr.total_out_rub, gr.total_out_chips, gr.net_rub,
+		       g.chat_id, COALESCE(g.ended_at, g.started_at)
+		FROM game_results gr
+		JOIN games g ON g.id = gr.game_id
+		WHERE gr.player_tg_id = $1 AND ($2 = 0 OR g.chat_id = $2) AND g.status = 'finished'
+		ORDER BY g.ended_at DESC NULLS LAST, g.id DESC
+	`, playerTgID, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("list player history: %w", err)
+	}
+	defer rows.Close()
+
+	var res []domain.PlayerGameResult
+	for rows.Next() {
+		var x domain.PlayerGameResult
+		if err := rows.Scan(
+			&x.GameID, &x.PlayerTgID, &x.BuyInCount, &x.RebuyCount,
+			&x.TotalInRub, &x.TotalOutRub, &x.TotalOutChips, &x.NetRub,
+			&x.ChatID, &x.EndedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan player history: %w", err)
+		}
+		res = append(res, x)
+	}
+	return res, rows.Err()
+}
+
+// LeaderboardSince — рейтинг группы по играм, завершённым не раньше since (nil — за всё время).
+func (r *GameResultRepo) LeaderboardSince(ctx context.Context, chatID int64, since *time.Time) ([]domain.PlayerChatStats, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT gr.player_tg_id,
+		       COUNT(*)                                AS game_count,
+		       SUM(gr.net_rub)                         AS total_net_rub,
+		       COUNT(*) FILTER (WHERE gr.net_rub > 0)  AS wins_count
+		FROM game_results gr
+		JOIN games g ON g.id = gr.game_id
+		WHERE g.chat_id = $1 AND g.status = 'finished'
+		  AND ($2::timestamptz IS NULL OR g.ended_at >= $2)
+		GROUP BY gr.player_tg_id
+		ORDER BY total_net_rub DESC, game_count DESC
+	`, chatID, since)
+	if err != nil {
+		return nil, fmt.Errorf("leaderboard: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []domain.PlayerChatStats
+	for rows.Next() {
+		var s domain.PlayerChatStats
+		if err := rows.Scan(&s.PlayerTgID, &s.GameCount, &s.TotalNetRub, &s.WinsCount); err != nil {
+			return nil, fmt.Errorf("scan leaderboard row: %w", err)
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
 }

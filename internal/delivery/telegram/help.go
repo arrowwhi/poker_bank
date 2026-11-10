@@ -50,6 +50,8 @@ var botCommands = []commandInfo{
 	{"/me", "мои показатели в текущей игре", []role{roleDealer, rolePlayer, roleOut}},
 	{"/history [N]", "последние N завершённых игр", []role{roleNoGame, roleDealer, rolePlayer, roleOut, roleOutsider}},
 	{"/stats [@user]", "статистика чата или конкретного игрока", []role{roleNoGame, roleDealer, rolePlayer, roleOut, roleOutsider}},
+	{"/game <id>", "подробности игры: итоги, переводы, лог событий", []role{roleNoGame, roleDealer, rolePlayer, roleOut, roleOutsider}},
+	{"/admin_cancel", "отменить игру, если дилер молчит больше 6 ч (только админ чата)", []role{roleOutsider, roleOut, rolePlayer}},
 }
 
 var roleLabels = map[role]string{

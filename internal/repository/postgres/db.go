@@ -29,3 +29,16 @@ func NewPool(ctx context.Context, dsn string) (*infrapg.Pool, error) {
 
 	return pool, nil
 }
+
+// TxManager запускает сервисные операции в транзакции пула (interfaces.TxManager).
+type TxManager struct {
+	pool *infrapg.Pool
+}
+
+// NewTxManager wraps the pool as interfaces.TxManager.
+func NewTxManager(pool *infrapg.Pool) *TxManager { return &TxManager{pool: pool} }
+
+// InTx runs fn in a transaction (a savepoint if ctx already carries one).
+func (m *TxManager) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return m.pool.InTx(ctx, fn)
+}

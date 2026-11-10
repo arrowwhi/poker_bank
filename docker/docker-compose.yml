@@ -30,18 +30,22 @@ services:
       GOOSE_DBSTRING: "host=postgres port=5432 dbname=poker_bank user=poker password=poker sslmode=disable"
       GOOSE_MIGRATION_DIR: /migrations
     command: ["up"]
+    # Бот сам применяет встроенные миграции при старте; сервис нужен только
+    # для ручного запуска: make migrate / make migrate-down.
     profiles:
-      - dev
-      - prod
+      - tools
 
   bot:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-}
+        VITE_APP_SHORT_NAME: ${VITE_APP_SHORT_NAME:-}
     restart: unless-stopped
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     env_file: ../.env
     environment:
       DATABASE_URL: "postgres://poker:poker@postgres:5432/poker_bank?sslmode=disable"
@@ -58,8 +62,8 @@ services:
       - go_cache:/root/go/pkg/mod
       - ../secrets:/app/secrets:ro
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     env_file: ../.env
     environment:
       DATABASE_URL: "postgres://poker:poker@postgres:5432/poker_bank?sslmode=disable"

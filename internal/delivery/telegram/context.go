@@ -55,6 +55,17 @@ func (c *Context) Reply(text string, markup ...*Markup) error {
 	return err
 }
 
+// ReplyMessage отвечает на текущее сообщение (или пишет в чат для нажатия кнопки)
+// и возвращает отправленное сообщение.
+func (c *Context) ReplyMessage(text string, markup ...*Markup) (tg.Message, error) {
+	req := c.request(text, markup)
+	if m := c.Update.Message; m != nil {
+		req.ReplyToMessageID = m.MessageID
+	}
+
+	return tgforum.Send(c, c.API(), req)
+}
+
 // Send отправляет сообщение в текущий чат и топик.
 func (c *Context) Send(text string, markup ...*Markup) error {
 	_, err := tgforum.Send(c, c.API(), c.request(text, markup))

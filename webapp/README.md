@@ -8,7 +8,7 @@
 ```bash
 cd webapp
 npm install
-npm run dev        # http://localhost:5173 — мок API + мок Telegram
+npm run dev        # http://localhost:5173 — мок API + мок Telegram (VITE_API_URL пуст)
 npm run build      # tsc --noEmit + сборка в dist/
 npm run typecheck
 ```
@@ -32,8 +32,8 @@ npm run typecheck
 
 | Переменная | Назначение |
 |---|---|
-| `VITE_API_URL` | База Go-бэкенда (например `https://bankir.example.com`). Пусто → in-memory мок. |
-| `VITE_USE_MOCK=1` | Принудительно мок даже при заданном `VITE_API_URL`. |
+| `VITE_API_URL` | База Go-бэкенда. Пусто: в `npm run dev` — in-memory мок, в прод-сборке — тот же origin (`/api` отдаёт Go-сервер вместе с фронтом). |
+| `VITE_USE_MOCK=1` | Принудительно мок (в том числе в сборке). |
 | `VITE_BOT_USERNAME` | Username бота без @ — ссылка «Добавить бота в группу». |
 | `VITE_APP_SHORT_NAME` | Short name Mini App — ссылка `t.me/<bot>/<app>?startapp=<chat_id>`. |
 

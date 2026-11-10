@@ -46,14 +46,16 @@ func (s *PendingService) Resolve(ctx context.Context, id int64, status domain.Pe
 	return s.pending.Resolve(ctx, id, status, resolvedByTgID)
 }
 
-// ExpirePending переводит в expired все pending-запросы старше ttl.
-func (s *PendingService) ExpirePending(ctx context.Context, ttl time.Duration) {
-	n, err := s.pending.ExpireOlderThan(ctx, ttl)
+// ExpirePending переводит в expired все pending-запросы старше ttl и возвращает их,
+// чтобы убрать кнопки из сообщений в чате.
+func (s *PendingService) ExpirePending(ctx context.Context, ttl time.Duration) []domain.PendingAction {
+	expired, err := s.pending.ExpireOlderThan(ctx, ttl)
 	if err != nil {
 		s.log.Error("expire pending actions", zap.Error(err))
-		return
+		return nil
 	}
-	if n > 0 {
-		s.log.Info("expired pending actions", zap.Int64("count", n))
+	if len(expired) > 0 {
+		s.log.Info("expired pending actions", zap.Int("count", len(expired)))
 	}
+	return expired
 }

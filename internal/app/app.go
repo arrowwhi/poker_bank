@@ -80,7 +80,9 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 
 	gameSvc := service.NewGameService(
 		gameRepo, ledgerRepo, participantRepo,
-		resultRepo, settlementRepo, pendingRepo, exporter, log,
+		resultRepo, settlementRepo, pendingRepo,
+		postgres.NewChatRepo(pool), postgres.NewTxManager(pool),
+		exporter, log,
 	)
 	pendingSvc := service.NewPendingService(pendingRepo, log)
 
@@ -121,6 +123,7 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 	deps := httpdelivery.Deps{
 		Games:           gameSvc,
 		Players:         playerSvc,
+		Notifier:        h,
 		Log:             log,
 		Health:          a.Health(),
 		WebAssets:       assets,
@@ -142,11 +145,12 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 
 	log.Info("starting poker-bank", zap.String("telegram_mode", cfg.TelegramMode), zap.String("http_port", cfg.HTTPPort))
 
-	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc))
+	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc, h))
 }
 
-// expirePendingJob раз в минуту переводит старые pending-запросы в expired.
-func expirePendingJob(pending *service.PendingService) tg.ComponentFunc {
+// expirePendingJob раз в минуту переводит старые pending-запросы в expired
+// и убирает кнопки из их сообщений.
+func expirePendingJob(pending *service.PendingService, h *telegram.Handler) tg.ComponentFunc {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -156,7 +160,7 @@ func expirePendingJob(pending *service.PendingService) tg.ComponentFunc {
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
-				pending.ExpirePending(ctx, pendingTTL)
+				h.RequestsClosed(ctx, pending.ExpirePending(ctx, pendingTTL))
 			}
 		}
 	}

@@ -22,6 +22,14 @@ func (h *Handler) UpsertPlayer(next tg.HandlerFunc) tg.HandlerFunc {
 			if err := h.player.Upsert(context.Background(), p); err != nil {
 				h.log.Warn("upsert player", zap.Error(err), zap.Int64("tg_id", u.ID))
 			}
+			// Группа и её участник: из них Mini App строит список столов и picker игроков.
+			if chat := c.Update.Chat(); chat != nil && !chat.IsPrivate() {
+				err := h.game.RememberChat(context.Background(),
+					&domain.Chat{ID: chat.ID, Title: chat.Title, Type: chat.Type}, u.ID)
+				if err != nil {
+					h.log.Warn("remember chat", zap.Error(err), zap.Int64("chat_id", chat.ID))
+				}
+			}
 		}
 		return next(c)
 	}

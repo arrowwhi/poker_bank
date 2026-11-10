@@ -38,7 +38,7 @@ func (r *LedgerRepo) ListByGame(ctx context.Context, gameID int64) ([]domain.Led
 	rows, err := r.db.Query(ctx, `
 		SELECT id, game_id, player_tg_id, type, amount_rub, amount_chips,
 		       created_by_tg_id, created_at, is_void, void_reason
-		FROM ledger WHERE game_id = $1 ORDER BY created_at
+		FROM ledger WHERE game_id = $1 ORDER BY created_at, id
 	`, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("list ledger: %w", err)
@@ -67,7 +67,7 @@ func (r *LedgerRepo) VoidLastN(ctx context.Context, gameID int64, n int) ([]doma
 		WHERE id IN (
 			SELECT id FROM ledger
 			WHERE game_id = $1 AND is_void = false
-			ORDER BY created_at DESC
+			ORDER BY created_at DESC, id DESC
 			LIMIT $2
 		)
 		RETURNING id, game_id, player_tg_id, type, amount_rub, amount_chips,

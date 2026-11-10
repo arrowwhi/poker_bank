@@ -191,3 +191,80 @@ func (r *GameRepo) Cancel(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+const gameCols = `g.id, g.chat_id, g.dealer_tg_id, g.buy_in_rub, g.buy_in_chips, g.rebuy_rub, g.rebuy_chips,
+		       g.status, g.started_at, g.ended_at, g.bank_delta_rub`
+
+func (r *GameRepo) queryGames(ctx context.Context, query string, args ...any) ([]domain.Game, error) {
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query games: %w", err)
+	}
+	defer rows.Close()
+
+	var games []domain.Game
+	for rows.Next() {
+		var g domain.Game
+		if err := rows.Scan(
+			&g.ID, &g.ChatID, &g.DealerTgID,
+			&g.BuyInRub, &g.BuyInChips, &g.RebuyRub, &g.RebuyChips,
+			&g.Status, &g.StartedAt, &g.EndedAt, &g.BankDeltaRub,
+		); err != nil {
+			return nil, fmt.Errorf("scan game: %w", err)
+		}
+		games = append(games, g)
+	}
+	return games, rows.Err()
+}
+
+// ListVisible возвращает игры, которые видит пользователь: в его группах или с его участием.
+// chatID = 0 — все группы; status = "" — любой статус.
+func (r *GameRepo) ListVisible(ctx context.Context, tgID, chatID int64, status domain.GameStatus, limit int) ([]domain.Game, error) {
+	return r.queryGames(ctx, `
+		SELECT `+gameCols+`
+		FROM games g
+		WHERE ($2 = 0 OR g.chat_id = $2)
+		  AND ($3 = '' OR g.status = $3)
+		  AND (g.dealer_tg_id = $1
+		       OR EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = g.chat_id AND m.player_tg_id = $1)
+		       OR EXISTS (SELECT 1 FROM participants p WHERE p.game_id = g.id AND p.player_tg_id = $1))
+		ORDER BY g.started_at DESC
+		LIMIT $4`, tgID, chatID, string(status), limit)
+}
+
+// GetLastByChat — последняя игра в группе (для пресета «как в прошлый раз»); nil, если игр не было.
+func (r *GameRepo) GetLastByChat(ctx context.Context, chatID int64) (*domain.Game, error) {
+	games, err := r.queryGames(ctx, `
+		SELECT `+gameCols+` FROM games g WHERE g.chat_id = $1 ORDER BY g.started_at DESC LIMIT 1`, chatID)
+	if err != nil || len(games) == 0 {
+		return nil, err
+	}
+	return &games[0], nil
+}
+
+// Number — порядковый номер игры в её группе («Игра #13»).
+func (r *GameRepo) Number(ctx context.Context, g *domain.Game) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `SELECT count(*) FROM games WHERE chat_id = $1 AND id <= $2`, g.ChatID, g.ID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("game number: %w", err)
+	}
+	return n, nil
+}
+
+// SetSettleMessageID запоминает сообщение с планом переводов.
+func (r *GameRepo) SetSettleMessageID(ctx context.Context, id, messageID int64) error {
+	if _, err := r.db.Exec(ctx, `UPDATE games SET settle_message_id = $1 WHERE id = $2`, messageID, id); err != nil {
+		return fmt.Errorf("set settle message id: %w", err)
+	}
+	return nil
+}
+
+// GetSettleMessageID — сообщение с планом переводов или nil.
+func (r *GameRepo) GetSettleMessageID(ctx context.Context, id int64) (*int64, error) {
+	var msgID *int64
+	if err := r.db.QueryRow(ctx, `SELECT settle_message_id FROM games WHERE id = $1`, id).Scan(&msgID); err != nil {
+		return nil, fmt.Errorf("get settle message id: %w", err)
+	}
+	return msgID, nil
+}

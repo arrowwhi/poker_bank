@@ -22,6 +22,11 @@ type GameRepository interface {
 	GetActiveByChat(ctx context.Context, chatID int64) (*domain.Game, error)
 	ListFinishedByChat(ctx context.Context, chatID int64, limit int) ([]domain.Game, error)
 	ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain.Game, error)
+	ListVisible(ctx context.Context, tgID, chatID int64, status domain.GameStatus, limit int) ([]domain.Game, error)
+	GetLastByChat(ctx context.Context, chatID int64) (*domain.Game, error)
+	Number(ctx context.Context, g *domain.Game) (int, error)
+	SetSettleMessageID(ctx context.Context, id, messageID int64) error
+	GetSettleMessageID(ctx context.Context, id int64) (*int64, error)
 	UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error
 	Finish(ctx context.Context, params FinishGameParams) error
 	Cancel(ctx context.Context, id int64) error
@@ -60,7 +65,11 @@ type PendingActionRepository interface {
 	ListPendingByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error)
 	Resolve(ctx context.Context, id int64, status domain.PendingStatus, resolvedByTgID int64) (*domain.PendingAction, error)
 	CancelByPlayer(ctx context.Context, gameID int64, playerTgID int64) ([]domain.PendingAction, error)
-	ExpireOlderThan(ctx context.Context, olderThan time.Duration) (int64, error)
+	ExpireOlderThan(ctx context.Context, olderThan time.Duration) ([]domain.PendingAction, error)
+	SetMessageID(ctx context.Context, id, messageID int64) error
+	ListByTarget(ctx context.Context, gameID, targetTgID int64, limit int) ([]domain.PendingAction, error)
+	CancelOne(ctx context.Context, id, byTgID int64) (*domain.PendingAction, error)
+	CancelByGame(ctx context.Context, gameID int64) ([]domain.PendingAction, error)
 }
 
 // GameResultRepository defines persistence operations for game results.
@@ -69,6 +78,8 @@ type GameResultRepository interface {
 	ListByGame(ctx context.Context, gameID int64) ([]domain.GameResult, error)
 	ListByPlayer(ctx context.Context, playerTgID int64, chatID int64) ([]domain.GameResult, error)
 	GetLeaderboard(ctx context.Context, chatID int64) ([]domain.PlayerChatStats, error)
+	ListHistory(ctx context.Context, playerTgID, chatID int64) ([]domain.PlayerGameResult, error)
+	LeaderboardSince(ctx context.Context, chatID int64, since *time.Time) ([]domain.PlayerChatStats, error)
 }
 
 // SettlementRepository defines persistence operations for settlements.
@@ -79,6 +90,25 @@ type SettlementRepository interface {
 	// MarkByPlayer marks every unpaid outgoing settlement of the player as paid and
 	// every unreceived incoming one as received. Returns the number of changed rows.
 	MarkByPlayer(ctx context.Context, gameID, tgID int64) (int64, error)
+	ListOpenByPlayer(ctx context.Context, tgID int64) ([]domain.Settlement, error)
+}
+
+// ChatRepository defines persistence operations for groups and their known members.
+type ChatRepository interface {
+	Upsert(ctx context.Context, c *domain.Chat) error
+	TouchMember(ctx context.Context, chatID, tgID int64) error
+	RemoveMember(ctx context.Context, chatID, tgID int64) error
+	Get(ctx context.Context, id int64) (*domain.Chat, error)
+	ListByMember(ctx context.Context, tgID int64) ([]domain.Chat, error)
+	IsMember(ctx context.Context, chatID, tgID int64) (bool, error)
+	ListMembers(ctx context.Context, chatID int64) ([]domain.Player, error)
+	CountMembers(ctx context.Context, chatID int64) (int, error)
+}
+
+// TxManager runs fn in a database transaction carried by ctx: repositories called
+// with that ctx take part in it.
+type TxManager interface {
+	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // ChatTopicRepository defines persistence operations for chat-to-topic bindings.

@@ -588,6 +588,18 @@ while debtors не пуст и creditors не пуст:
 
 ---
 
+## 13a. Mini App
+
+- Фронт: `webapp/` (Vite + React), встраивается в бинарь и отдаётся тем же HTTP-сервером; API — `/api/*`
+  (`internal/delivery/http`), авторизация `Authorization: tma <initData>`. Контракт — `webapp/src/api/types.ts` и `client.ts`.
+- Логика стола общая для бота и API: `internal/service/table.go` (запросы, решения дилера, прямые действия, завершение).
+  Сообщения в чат при действиях из приложения — `internal/delivery/telegram/notify.go` (интерфейс `Notifier`).
+- У запросов сохраняется `pending_actions.message_id`, у завершённой игры — `games.settle_message_id`: решение в приложении
+  правит сообщение в чате и наоборот.
+- Группы и их участники — таблицы `chats` / `chat_members` (миграция 006): пополняются из любого сообщения или нажатия
+  кнопки в группе и при успешной проверке `getChatMember` из Mini App. Доступ к игре: дилер, участник или член группы.
+- Запрос дилера самому себе (buy-in, rebuy, cash-out) записывается сразу, без подтверждения.
+
 ## 14. Вне scope (на будущее)
 
 - Поддержка нескольких валют
