@@ -591,9 +591,24 @@ func (s *GameService) GameNumber(ctx context.Context, g *domain.Game) (int, erro
 	return s.games.Number(ctx, g)
 }
 
-// LastGameInChat — последняя игра группы или nil.
-func (s *GameService) LastGameInChat(ctx context.Context, chatID int64) (*domain.Game, error) {
-	return s.games.GetLastByChat(ctx, chatID)
+// PreviousGameInChat — игра, чьи параметры предлагаются по умолчанию при создании новой
+// («как в прошлый раз»), или nil, если в группе ещё не играли.
+//
+// Берётся последняя по started_at завершённая игра: её параметрами реально играли.
+// Отменённая игра часто означает ошибку в параметрах (создали — отменили — пересоздали),
+// поэтому она подходит, только если завершённых в группе нет. Активная игра не учитывается:
+// пока она идёт, новую в этой группе создать нельзя.
+func (s *GameService) PreviousGameInChat(ctx context.Context, chatID int64) (*domain.Game, error) {
+	for _, status := range []domain.GameStatus{domain.GameStatusFinished, domain.GameStatusCancelled} {
+		g, err := s.games.GetLastByChatStatus(ctx, chatID, status)
+		if err != nil {
+			return nil, err
+		}
+		if g != nil {
+			return g, nil
+		}
+	}
+	return nil, nil
 }
 
 // PlayerHistory — результаты игрока по завершённым играм (chatID = 0 — все группы).

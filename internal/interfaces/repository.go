@@ -23,7 +23,8 @@ type GameRepository interface {
 	ListFinishedByChat(ctx context.Context, chatID int64, limit int) ([]domain.Game, error)
 	ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain.Game, error)
 	ListVisible(ctx context.Context, tgID, chatID int64, status domain.GameStatus, limit int) ([]domain.Game, error)
-	GetLastByChat(ctx context.Context, chatID int64) (*domain.Game, error)
+	// GetLastByChatStatus — последняя по started_at игра группы в заданном статусе; nil, если таких нет.
+	GetLastByChatStatus(ctx context.Context, chatID int64, status domain.GameStatus) (*domain.Game, error)
 	Number(ctx context.Context, g *domain.Game) (int, error)
 	SetSettleMessageID(ctx context.Context, id, messageID int64) error
 	GetSettleMessageID(ctx context.Context, id int64) (*int64, error)
