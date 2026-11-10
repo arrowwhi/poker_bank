@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api, type OpenDebt } from '../api';
-import { NetChart } from '../components/domain';
-import { Avatar, Chips, ErrorState, ListRow, Loading, Screen, SectionHeader, StatTile, useToast } from '../components/ui';
+import { ChatSelect, NetChart } from '../components/domain';
+import { Avatar, Chips, ErrorState, ListRow, Loading, Screen, SectionHeader, Skeleton, StatTile, useToast } from '../components/ui';
 import { date, dateShort, handle, monthYear, netClass, rub, signedRub } from '../lib/format';
 import { useAsync } from '../lib/hooks';
 import { bestWorst, cumulativeSeries, plusStreaks, type ChartPeriod } from '../lib/stats';
@@ -53,8 +53,9 @@ export function Profile({ userId, chatId: initialChat }: { userId?: number; chat
             <div className="muted">{handle(s.user)} · играет с {monthYear(s.member_since)}</div>
           </div>
         </div>
-        <Chips<number | 'all'> value={chatId ?? 'all'} onChange={(v) => { haptic.select(); setChatId(v === 'all' ? null : v); }}
-          options={[...(chats.data ?? []).map((c) => ({ value: c.id as number | 'all', label: c.title })), { value: 'all', label: 'Все чаты' }]} />
+        {chats.loading ? <Skeleton h={55} /> : (
+          <ChatSelect chats={chats.data ?? []} value={chatId} onChange={(id) => { haptic.select(); setChatId(id); }} />
+        )}
       </div>
 
       <div className="grid2">

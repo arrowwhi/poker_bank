@@ -58,12 +58,18 @@ func (s *GameService) NewGame(ctx context.Context, g *domain.Game) (int64, error
 	if err != nil {
 		return 0, err
 	}
+	s.createSheetAsync(id)
+	return id, nil
+}
+
+// createSheetAsync заводит лист Google Sheets для игры в фоне. Вызывать после коммита
+// транзакции, создавшей игру: экспортёр читает её отдельным соединением.
+func (s *GameService) createSheetAsync(gameID int64) {
 	go func() {
-		if err := s.exporter.CreateGameSheet(context.Background(), id); err != nil {
-			s.log.Error("создание листа Google Sheets", zap.Int64("game_id", id), zap.Error(err))
+		if err := s.exporter.CreateGameSheet(context.Background(), gameID); err != nil {
+			s.log.Error("создание листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
 		}
 	}()
-	return id, nil
 }
 
 // syncSheetAsync пересчитывает и перезаписывает лист Google Sheets в фоне; ошибка не блокирует вызывающего.
@@ -145,7 +151,20 @@ func (s *GameService) Cancel(ctx context.Context, gameID int64) error {
 }
 
 // BuyIn records a BUY_IN ledger entry and adds the player as a participant.
+// Обе записи — одной транзакцией: buy-in без участника (и наоборот) не остаётся.
 func (s *GameService) BuyIn(ctx context.Context, game *domain.Game, playerTgID int64, createdByTgID int64) error {
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		return s.recordBuyIn(ctx, game, playerTgID, createdByTgID)
+	})
+	if err != nil {
+		return err
+	}
+	s.syncSheetAsync(game.ID)
+	return nil
+}
+
+// recordBuyIn пишет BUY_IN и участника внутри транзакции вызывающего.
+func (s *GameService) recordBuyIn(ctx context.Context, game *domain.Game, playerTgID int64, createdByTgID int64) error {
 	entry := &domain.LedgerEntry{
 		GameID:        game.ID,
 		PlayerTgID:    playerTgID,
@@ -157,15 +176,11 @@ func (s *GameService) BuyIn(ctx context.Context, game *domain.Game, playerTgID i
 	if _, err := s.ledger.Create(ctx, entry); err != nil {
 		return err
 	}
-	if err := s.participants.Create(ctx, &domain.Participant{
+	return s.participants.Create(ctx, &domain.Participant{
 		GameID:     game.ID,
 		PlayerTgID: playerTgID,
 		IsActive:   true,
-	}); err != nil {
-		return err
-	}
-	s.syncSheetAsync(game.ID)
-	return nil
+	})
 }
 
 // Rebuy records a REBUY ledger entry.
@@ -216,27 +231,70 @@ func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID
 	return cancelled, nil
 }
 
-// UndoLast аннулирует последние N записей леджера и восстанавливает статусы участников.
+// UndoLast аннулирует последние N записей леджера и восстанавливает места игроков.
 // Возвращает аннулированные записи для отображения в чате.
+//
+// Место каждого затронутого игрока пересчитывается по оставшимся записям, а не по
+// типу аннулированной: порядок строк из VoidLastN не гарантирован, и при откате сразу
+// нескольких записей одного игрока (buy-in + cash-out) итог не должен от него зависеть.
+// Игрок без единой записи удаляется из participants (ТЗ §8.3) — иначе пустая игра
+// выглядит сыгранной и «Завершить» записывает её как finished вместо отмены.
 func (s *GameService) UndoLast(ctx context.Context, gameID int64, n int) ([]domain.LedgerEntry, error) {
-	voided, err := s.ledger.VoidLastN(ctx, gameID, n)
+	var voided []domain.LedgerEntry
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		var err error
+		if voided, err = s.ledger.VoidLastN(ctx, gameID, n); err != nil || len(voided) == 0 {
+			return err
+		}
+		entries, err := s.ledger.ListByGame(ctx, gameID)
+		if err != nil {
+			return err
+		}
+		done := make(map[int64]bool, len(voided))
+		for _, e := range voided {
+			if done[e.PlayerTgID] {
+				continue
+			}
+			done[e.PlayerTgID] = true
+
+			inGame, active := seatFromLedger(entries, e.PlayerTgID)
+			if !inGame {
+				err = s.participants.Delete(ctx, gameID, e.PlayerTgID)
+			} else {
+				err = s.participants.SetActive(ctx, gameID, e.PlayerTgID, active)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range voided {
+	if len(voided) > 0 {
+		s.syncSheetAsync(gameID)
+	}
+	return voided, nil
+}
+
+// seatFromLedger восстанавливает место игрока по действующим записям игры (в порядке
+// создания): inGame — у него есть хотя бы одна запись, active — он за столом
+// (после последнего buy-in не было cash-out).
+func seatFromLedger(entries []domain.LedgerEntry, playerTgID int64) (inGame, active bool) {
+	for _, e := range entries {
+		if e.IsVoid || e.PlayerTgID != playerTgID {
+			continue
+		}
+		inGame = true
 		switch e.Type {
 		case domain.LedgerBuyIn:
-			if err = s.participants.SetActive(ctx, gameID, e.PlayerTgID, false); err != nil {
-				return nil, err
-			}
+			active = true
 		case domain.LedgerCashOut:
-			if err = s.participants.SetActive(ctx, gameID, e.PlayerTgID, true); err != nil {
-				return nil, err
-			}
+			active = false
 		}
 	}
-	s.syncSheetAsync(gameID)
-	return voided, nil
+	return inGame, active
 }
 
 // GetBank returns the current bank balance for a game.

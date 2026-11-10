@@ -55,6 +55,8 @@ type chatDTO struct {
 	MembersCount int                `json:"members_count"`
 	ActiveGame   *chatActiveGameDTO `json:"active_game"`
 	LastGame     *chatLastGameDTO   `json:"last_game"`
+	GamesCount   int                `json:"games_count"`
+	LastGameAt   *time.Time         `json:"last_game_at"`
 }
 
 type gameSummaryDTO struct {

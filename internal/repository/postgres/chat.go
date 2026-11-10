@@ -77,24 +77,33 @@ func (r *ChatRepo) Get(ctx context.Context, id int64) (*domain.Chat, error) {
 	return c, nil
 }
 
-// ListByMember возвращает группы, где пользователь известен как участник.
-func (r *ChatRepo) ListByMember(ctx context.Context, tgID int64) ([]domain.Chat, error) {
+// ListByMember возвращает группы, где пользователь известен как участник, вместе с
+// числом завершённых игр и датой последней из них. Порядок — по давности появления
+// пользователя в группе (свежие выше); по популярности их упорядочивает сервис.
+func (r *ChatRepo) ListByMember(ctx context.Context, tgID int64) ([]domain.ChatActivity, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT c.id, c.title, c.type, c.created_at, c.updated_at
+		SELECT c.id, c.title, c.type, c.created_at, c.updated_at,
+		       COALESCE(g.games_count, 0), g.last_game_at
 		FROM chats c
 		JOIN chat_members m ON m.chat_id = c.id
+		LEFT JOIN (
+		  SELECT chat_id, COUNT(*) AS games_count, MAX(ended_at) AS last_game_at
+		  FROM games
+		  WHERE status = 'finished'
+		  GROUP BY chat_id
+		) g ON g.chat_id = c.id
 		WHERE m.player_tg_id = $1
-		ORDER BY m.last_seen_at DESC
+		ORDER BY m.last_seen_at DESC, c.id
 	`, tgID)
 	if err != nil {
 		return nil, fmt.Errorf("list chats by member: %w", err)
 	}
 	defer rows.Close()
 
-	var chats []domain.Chat
+	var chats []domain.ChatActivity
 	for rows.Next() {
-		var c domain.Chat
-		if err := rows.Scan(&c.ID, &c.Title, &c.Type, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		var c domain.ChatActivity
+		if err := rows.Scan(&c.ID, &c.Title, &c.Type, &c.CreatedAt, &c.UpdatedAt, &c.GamesCount, &c.LastGameAt); err != nil {
 			return nil, fmt.Errorf("scan chat: %w", err)
 		}
 		chats = append(chats, c)

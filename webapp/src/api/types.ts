@@ -54,6 +54,10 @@ export interface Chat {
   active_game?: { id: number; dealer: User } | null;
   /** Прошлая игра чата — её параметры подставляются по умолчанию при создании новой. */
   last_game?: LastGame | null;
+  /** Число завершённых игр в чате. По нему чаты упорядочены: от самых популярных вниз. */
+  games_count: number;
+  /** Когда закончилась последняя завершённая игра; null — в чате ещё не играли. */
+  last_game_at?: string | null;
 }
 
 export interface GameSummary {

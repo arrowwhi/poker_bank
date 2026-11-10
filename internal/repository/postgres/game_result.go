@@ -120,6 +120,9 @@ func scanGameResults(rows interface {
 }
 
 // ListHistory — результаты игрока в завершённых играх, новые первыми. chatID = 0 — по всем группам.
+//
+// Приведение $2::bigint обязательно: по `$2 = 0` Postgres выводит тип параметра как integer,
+// и id супергруппы (-100xxxxxxxxxx) не кодируется в int4.
 func (r *GameResultRepo) ListHistory(ctx context.Context, playerTgID, chatID int64) ([]domain.PlayerGameResult, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT gr.game_id, gr.player_tg_id, gr.buy_in_count, gr.rebuy_count,
@@ -127,7 +130,7 @@ func (r *GameResultRepo) ListHistory(ctx context.Context, playerTgID, chatID int
 		       g.chat_id, COALESCE(g.ended_at, g.started_at)
 		FROM game_results gr
 		JOIN games g ON g.id = gr.game_id
-		WHERE gr.player_tg_id = $1 AND ($2 = 0 OR g.chat_id = $2) AND g.status = 'finished'
+		WHERE gr.player_tg_id = $1 AND ($2::bigint = 0 OR g.chat_id = $2) AND g.status = 'finished'
 		ORDER BY g.ended_at DESC NULLS LAST, g.id DESC
 	`, playerTgID, chatID)
 	if err != nil {
