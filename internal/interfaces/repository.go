@@ -101,7 +101,9 @@ type ChatRepository interface {
 	TouchMember(ctx context.Context, chatID, tgID int64) error
 	RemoveMember(ctx context.Context, chatID, tgID int64) error
 	Get(ctx context.Context, id int64) (*domain.Chat, error)
-	ListByMember(ctx context.Context, tgID int64) ([]domain.Chat, error)
+	// ListByMember returns the chats the user is a known member of, most recently
+	// seen first, with the number of finished games and the end of the latest one.
+	ListByMember(ctx context.Context, tgID int64) ([]domain.ChatActivity, error)
 	IsMember(ctx context.Context, chatID, tgID int64) (bool, error)
 	ListMembers(ctx context.Context, chatID int64) ([]domain.Player, error)
 	CountMembers(ctx context.Context, chatID int64) (int, error)
