@@ -50,7 +50,7 @@ export class ApiError extends Error {
 export interface BankirApi {
   /** GET /api/me */
   getMe(): Promise<Me>;
-  /** GET /api/chats — группы, где есть бот и пользователь */
+  /** GET /api/chats — группы, где есть бот и пользователь; от самых популярных (по числу завершённых игр) вниз */
   listChats(): Promise<Chat[]>;
   /** GET /api/chats/:id/members — известные боту участники чата (для выбора игрока) */
   listChatMembers(chatId: number): Promise<ChatMember[]>;
