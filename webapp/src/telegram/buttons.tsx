@@ -2,7 +2,7 @@
 // управляет кнопкой. В Telegram — нативные кнопки, в браузере — HTML-заглушки той же формы.
 import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { inTelegram, tg } from './telegram';
-import { toggleDevTheme } from './theme';
+import { toggleDevTheme, useThemeVersion } from './theme';
 
 function createStack<T>() {
   // prio: базовые владельцы (роутер) = 0, экраны/шторки = 1. Верх — максимальный prio, среди равных — последний.
@@ -80,6 +80,7 @@ const toneVar: Record<MainButtonTone, [string, string]> = {
 /** Нативная MainButton Telegram. */
 function NativeMain() {
   const cfg = useTop(mainStack);
+  const theme = useThemeVersion(); // цвета кнопки берутся из токенов — перекрашиваем при смене темы
   useEffect(() => {
     const mb = tg.MainButton;
     if (!cfg) { mb.hide(); return; }
@@ -91,7 +92,7 @@ function NativeMain() {
     const h = () => { if (!cfg.disabled && !cfg.progress) cfg.onClick(); };
     mb.onClick(h);
     return () => { mb.offClick(h); };
-  }, [cfg]);
+  }, [cfg, theme]);
   return null;
 }
 

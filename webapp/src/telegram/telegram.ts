@@ -70,6 +70,11 @@ export interface WebApp {
     selectionChanged(): void;
   };
   openTelegramLink?(url: string): void;
+  /** Bot API 6.9+: хранилище «ключ → строка», общее для устройств пользователя. */
+  CloudStorage?: {
+    setItem(key: string, value: string, cb?: (err: string | null, ok?: boolean) => void): void;
+    getItem(key: string, cb: (err: string | null, value?: string) => void): void;
+  };
 }
 
 declare global {
