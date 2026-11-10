@@ -115,7 +115,7 @@ func (h *Handler) Announce(ctx context.Context, chatID int64, text string) {
 func (h *Handler) GameFinished(ctx context.Context, g *domain.Game, res *service.EndResult) {
 	h.RequestsClosed(ctx, res.CancelledPending)
 	if res.Cancelled {
-		h.Announce(ctx, g.ChatID, fmt.Sprintf("🚫 Игра #%d отменена: никто не сделал buy-in.", g.ID))
+		h.Announce(ctx, g.ChatID, emptyGameCancelledText(g.ID))
 		return
 	}
 	m, err := h.sendToChat(ctx, g.ChatID, h.buildEndGameMessage(ctx, g.ID, res.BankRub, res.Settlements), h.settleMarkup(g.ID, res.Settlements))

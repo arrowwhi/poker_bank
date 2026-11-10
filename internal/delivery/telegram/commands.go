@@ -208,37 +208,27 @@ func (h *Handler) doEndGame(c *Context, force bool) error {
 		return nil
 	}
 
-	active, err := h.game.GetActiveParticipants(ctx, game.ID)
-	if err != nil {
-		return err
-	}
-	if len(active) > 0 {
-		return c.Reply(h.buildActiveParticipantsList(ctx, active))
-	}
-
-	bank, err := h.game.GetBank(ctx, game.ID)
-	if err != nil {
-		return err
-	}
-	if !force && bank != 0 {
+	res, err := h.game.EndGame(ctx, game, c.Sender().ID, force)
+	var active *service.ActiveParticipantsError
+	var mismatch *service.BankMismatchError
+	switch {
+	case errors.As(err, &active):
+		return c.Reply(h.buildActiveParticipantsList(ctx, active.PlayerIDs))
+	case errors.As(err, &mismatch):
 		return c.Reply(fmt.Sprintf(
 			"⚠️ Расхождение: банк = %+d₽. Чтобы продолжить — /endgame_force.",
-			bank,
+			mismatch.BankRub,
 		))
-	}
-
-	// При force передаём delta; при обычном endgame bank гарантированно == 0
-	settlements, err := h.game.Finish(ctx, game.ID, bank)
-	if err != nil {
+	case err != nil:
 		h.log.Error("завершение игры", zap.Error(err))
 		return c.Reply("Ошибка при завершении игры.")
 	}
 
-	h.closeGamePending(ctx, game.ID)
-	if stored, lErr := h.game.ListSettlements(ctx, game.ID); lErr == nil {
-		settlements = stored
+	h.RequestsClosed(ctx, res.CancelledPending)
+	if res.Cancelled {
+		return c.Reply(emptyGameCancelledText(game.ID))
 	}
-	m, err := c.ReplyMessage(h.buildEndGameMessage(ctx, game.ID, bank, settlements), h.settleMarkup(game.ID, settlements))
+	m, err := c.ReplyMessage(h.buildEndGameMessage(ctx, game.ID, res.BankRub, res.Settlements), h.settleMarkup(game.ID, res.Settlements))
 	if err != nil {
 		return err
 	}
@@ -246,14 +236,10 @@ func (h *Handler) doEndGame(c *Context, force bool) error {
 	return nil
 }
 
-// closeGamePending закрывает висящие запросы завершённой игры и правит их сообщения.
-func (h *Handler) closeGamePending(ctx context.Context, gameID int64) {
-	cancelled, err := h.game.ClosePending(ctx, gameID)
-	if err != nil {
-		h.log.Warn("cancel pending of finished game", zap.Error(err), zap.Int64("game_id", gameID))
-		return
-	}
-	h.RequestsClosed(ctx, cancelled)
+// emptyGameCancelledText — сообщение об отмене игры, в которой никто не сделал buy-in:
+// «Завершить» для неё равносильно /cancel (ТЗ §11).
+func emptyGameCancelledText(gameID int64) string {
+	return fmt.Sprintf("🚫 Игра #%d отменена: никто не сделал buy-in.", gameID)
 }
 
 // handleCancel запрашивает подтверждение отмены игры у дилера.
@@ -1122,26 +1108,27 @@ func (h *Handler) handleEndGameCallback(c *Context, parts []string) error {
 		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может завершить игру."})
 	}
 
-	bank, err := h.game.GetBank(ctx, gameID)
-	if err != nil {
-		return err
-	}
-	if bank != 0 {
-		_ = c.Edit(fmt.Sprintf("⚠️ Расхождение: банк = %+d₽. Используй /endgame_force.", bank))
+	res, err := h.game.EndGame(ctx, game, c.Sender().ID, false)
+	var active *service.ActiveParticipantsError
+	var mismatch *service.BankMismatchError
+	switch {
+	case errors.As(err, &active):
+		_ = c.Edit(h.buildActiveParticipantsList(ctx, active.PlayerIDs))
 		return c.Respond()
-	}
-
-	settlements, err := h.game.Finish(ctx, gameID, 0)
-	if err != nil {
+	case errors.As(err, &mismatch):
+		_ = c.Edit(fmt.Sprintf("⚠️ Расхождение: банк = %+d₽. Используй /endgame_force.", mismatch.BankRub))
+		return c.Respond()
+	case err != nil:
 		h.log.Error("завершение игры (callback)", zap.Error(err))
 		return c.Respond(&CallbackResponse{Text: "Ошибка при завершении игры."})
 	}
 
-	h.closeGamePending(ctx, gameID)
-	if stored, lErr := h.game.ListSettlements(ctx, gameID); lErr == nil {
-		settlements = stored
+	h.RequestsClosed(ctx, res.CancelledPending)
+	if res.Cancelled {
+		_ = c.Edit(emptyGameCancelledText(gameID))
+		return c.Respond()
 	}
-	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, 0, settlements), h.settleMarkup(gameID, settlements))
+	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, res.BankRub, res.Settlements), h.settleMarkup(gameID, res.Settlements))
 	if m := c.Callback().Message; m != nil {
 		h.rememberSettleMessage(ctx, gameID, m.MessageID)
 	}
@@ -1344,13 +1331,13 @@ func (h *Handler) getActiveGameForDealer(c *Context, ctx context.Context) (*doma
 }
 
 // buildActiveParticipantsList формирует сообщение со списком игроков, которым нужен cash-out.
-func (h *Handler) buildActiveParticipantsList(ctx context.Context, participants []domain.Participant) string {
+func (h *Handler) buildActiveParticipantsList(ctx context.Context, playerIDs []int64) string {
 	sb := strings.Builder{}
 	sb.WriteString("❌ Сначала сделайте cash-out для:\n")
-	for _, p := range participants {
-		player, _ := h.player.GetByID(ctx, p.PlayerTgID)
+	for _, id := range playerIDs {
+		player, _ := h.player.GetByID(ctx, id)
 		sb.WriteString("• ")
-		sb.WriteString(formatPlayerByID(player, p.PlayerTgID))
+		sb.WriteString(formatPlayerByID(player, id))
 		sb.WriteByte('\n')
 	}
 	return sb.String()
