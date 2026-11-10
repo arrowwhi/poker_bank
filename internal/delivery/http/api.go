@@ -290,9 +290,9 @@ func (a *api) listChats(w http.ResponseWriter, r *http.Request) {
 		if g, err := a.games.GetActiveGame(ctx, c.ID); err == nil {
 			d.ActiveGame = &chatActiveGameDTO{ID: g.ID, Dealer: b.user(ctx, g.DealerTgID)}
 		}
-		if g, err := a.games.LastGameInChat(ctx, c.ID); err == nil && g != nil {
-			rate := rateOf(g)
-			d.LastRate = &rate
+		if g, err := a.games.PreviousGameInChat(ctx, c.ID); err == nil && g != nil {
+			d.LastGame = &chatLastGameDTO{ID: g.ID, StartedAt: g.StartedAt, Rate: rateOf(g)}
+			d.LastGame.Number, _ = a.games.GameNumber(ctx, g)
 		}
 		out = append(out, d)
 	}

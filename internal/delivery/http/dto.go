@@ -41,12 +41,20 @@ type chatActiveGameDTO struct {
 	Dealer userDTO `json:"dealer"`
 }
 
+// chatLastGameDTO — прошлая игра группы: её параметры подставляются при создании новой.
+type chatLastGameDTO struct {
+	ID        int64     `json:"id"`
+	Number    int       `json:"number"`
+	StartedAt time.Time `json:"started_at"`
+	Rate      rateDTO   `json:"rate"`
+}
+
 type chatDTO struct {
 	ID           int64              `json:"id"`
 	Title        string             `json:"title"`
 	MembersCount int                `json:"members_count"`
 	ActiveGame   *chatActiveGameDTO `json:"active_game"`
-	LastRate     *rateDTO           `json:"last_rate"`
+	LastGame     *chatLastGameDTO   `json:"last_game"`
 }
 
 type gameSummaryDTO struct {

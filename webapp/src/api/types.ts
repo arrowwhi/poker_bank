@@ -37,14 +37,23 @@ export interface Rate {
   rebuy_chips: number;
 }
 
+/** Прошлая игра чата: последняя завершённая, а если таких нет — последняя отменённая. */
+export interface LastGame {
+  id: number;
+  /** Порядковый номер игры в чате («Игра #12»). */
+  number: number;
+  started_at: string;
+  rate: Rate;
+}
+
 export interface Chat {
   id: number; // chat_id (отрицательный у групп)
   title: string;
   members_count: number;
   /** Активная игра в чате, если есть. */
   active_game?: { id: number; dealer: User } | null;
-  /** Параметры последней игры — для пресета «Как в прошлый раз». */
-  last_rate?: Rate | null;
+  /** Прошлая игра чата — её параметры подставляются по умолчанию при создании новой. */
+  last_game?: LastGame | null;
 }
 
 export interface GameSummary {
