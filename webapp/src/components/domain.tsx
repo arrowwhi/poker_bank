@@ -1,7 +1,7 @@
-import type { GameSummary, Participant, PendingAction, Settlement, User } from '../api';
-import { ago, chips, handle, netClass, rub, signedRub, time } from '../lib/format';
+import type { Chat, GameSummary, Participant, PendingAction, Settlement, User } from '../api';
+import { ago, chips, dateShort, handle, netClass, plural, rub, signedRub, time } from '../lib/format';
 import type { SeriesPoint } from '../lib/stats';
-import { Avatar, Badge, ListRow } from './ui';
+import { Avatar, Badge, ListRow, Select, type SelectOption } from './ui';
 
 export const ME_SUFFIX = ' (вы)';
 
@@ -132,4 +132,34 @@ export function NetChart({ points }: { points: SeriesPoint[] }) {
       </div>
     </div>
   );
+}
+
+const gamesLabel = (n: number) => `${n} ${plural(n, 'игра', 'игры', 'игр')}`;
+
+/**
+ * Выбор чата выпадающим списком: «Все чаты» (value = null) — первым пунктом, дальше чаты
+ * в порядке API — от самых популярных вниз.
+ */
+export function ChatSelect({ chats, value, onChange }: { chats: Chat[]; value: number | null; onChange: (chatId: number | null) => void }) {
+  const total = chats.reduce((n, c) => n + c.games_count, 0);
+  const options: SelectOption<number | 'all'>[] = [
+    {
+      value: 'all', title: 'Все чаты',
+      sub: `${chats.length} ${plural(chats.length, 'чат', 'чата', 'чатов')} · ${gamesLabel(total)}`,
+      left: (
+        <span className="select-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <rect width="6.5" height="6.5" rx="2" /><rect x="9.5" width="6.5" height="6.5" rx="2" />
+            <rect y="9.5" width="6.5" height="6.5" rx="2" /><rect x="9.5" y="9.5" width="6.5" height="6.5" rx="2" />
+          </svg>
+        </span>
+      ),
+    },
+    ...chats.map((c) => ({
+      value: c.id as number | 'all', title: c.title,
+      sub: c.games_count ? `${gamesLabel(c.games_count)}${c.last_game_at ? ` · последняя ${dateShort(c.last_game_at)}` : ''}` : 'ещё не играли',
+      left: <Avatar user={{ id: c.id, display_name: c.title }} size={36} />,
+    })),
+  ];
+  return <Select label="Чат" value={value ?? 'all'} options={options} onChange={(v) => onChange(v === 'all' ? null : v)} />;
 }

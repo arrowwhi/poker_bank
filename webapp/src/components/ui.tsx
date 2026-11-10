@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { User } from '../api';
 import { initials } from '../lib/format';
 import { FallbackHeader, useBackButton } from '../telegram/buttons';
@@ -88,6 +88,107 @@ export function Chips<T extends string | number>({ value, options, onChange }: {
       {options.map((o) => (
         <button key={String(o.value)} className={`chip ${o.value === value ? 'on' : ''}`} onClick={() => onChange(o.value)}>{o.label}</button>
       ))}
+    </div>
+  );
+}
+
+export interface SelectOption<T> { value: T; title: string; sub?: ReactNode; left?: ReactNode }
+
+/**
+ * Выпадающий список: в свёрнутом виде — выбранный пункт, по тапу список раскрывается под полем.
+ * Фокус остаётся на поле (combobox + aria-activedescendant): ↑/↓, Home/End — перемещение,
+ * Enter/пробел — выбор, Esc и «Назад» Telegram — закрыть.
+ */
+export function Select<T extends string | number>({ label, value, options, onChange }: {
+  label: string; value: T; options: SelectOption<T>[]; onChange: (v: T) => void;
+}) {
+  const id = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  // Подсвеченный пункт; -1 — список открыт тапом, подсветки нет, пока не начали ходить стрелками.
+  const [active, setActive] = useState(-1);
+  const selected = Math.max(0, options.findIndex((o) => o.value === value));
+  const cur = options[selected];
+  const last = options.length - 1;
+
+  // focus(): Safari не фокусирует кнопку по клику, а клавиши слушает именно она.
+  const show = (hl: number) => { setActive(hl); setOpen(true); trigger.current?.focus(); };
+  const hide = () => setOpen(false);
+  const pick = (i: number) => {
+    hide();
+    if (options[i] && options[i].value !== value) onChange(options[i].value);
+  };
+
+  useBackButton(open ? hide : null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const el = active >= 0 ? list.current?.children[active] : list.current;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [open, active]);
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const act = e.key === 'Enter' || e.key === ' ';
+    if (!open) {
+      if (act || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show(selected); }
+      return;
+    }
+    const from = active < 0 ? selected : active;
+    if (e.key === 'ArrowDown') setActive(Math.min(last, from + 1));
+    else if (e.key === 'ArrowUp') setActive(Math.max(0, from - 1));
+    else if (e.key === 'Home') setActive(0);
+    else if (e.key === 'End') setActive(last);
+    else if (act) pick(from);
+    else if (e.key === 'Escape') hide();
+    else { if (e.key === 'Tab') hide(); return; }
+    e.preventDefault();
+  };
+
+  if (!cur) return null;
+  return (
+    <div className="select" ref={root}>
+      <button
+        type="button" ref={trigger} className={`select-trigger ${open ? 'open' : ''}`}
+        role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-list`}
+        aria-label={`${label}: ${cur.title}`} aria-activedescendant={open && active >= 0 ? `${id}-${active}` : undefined}
+        onClick={() => (open ? hide() : show(-1))} onKeyDown={onKeyDown}
+        // Пробел активирует кнопку на keyup — без этого список, выбранный пробелом, открылся бы снова.
+        onKeyUp={(e) => { if (e.key === ' ') e.preventDefault(); }}
+      >
+        {cur.left}
+        <span className="grow">
+          <span className="select-title ellipsis">{cur.title}</span>
+          {cur.sub && <span className="select-sub ellipsis">{cur.sub}</span>}
+        </span>
+        <svg className="select-chev" width="12" height="7" viewBox="0 0 12 7" aria-hidden="true"><path d="M1 1l5 5 5-5" /></svg>
+      </button>
+      {open && (
+        // preventDefault на mousedown: клик по пункту не уводит фокус с поля.
+        <div className="select-list" id={`${id}-list`} ref={list} role="listbox" aria-label={label} onMouseDown={(e) => e.preventDefault()}>
+          {options.map((o, i) => (
+            <div
+              key={String(o.value)} id={`${id}-${i}`} role="option" aria-selected={i === selected}
+              className={`select-option ${i === selected ? 'on' : ''} ${i === active ? 'active' : ''}`}
+              onClick={() => pick(i)}
+              onPointerMove={(e) => { if (e.pointerType === 'mouse' && active !== i) setActive(i); }}
+            >
+              {o.left}
+              <span className="grow">
+                <span className="select-title ellipsis">{o.title}</span>
+                {o.sub && <span className="select-sub ellipsis">{o.sub}</span>}
+              </span>
+              {i === selected && <svg className="select-check" width="14" height="11" viewBox="0 0 14 11" aria-hidden="true"><path d="M1 6l4 4 8-9" /></svg>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

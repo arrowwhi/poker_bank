@@ -89,3 +89,15 @@ func (r *ParticipantRepo) SetActive(ctx context.Context, gameID int64, playerTgI
 	}
 	return nil
 }
+
+// Delete removes the participant row (undo of the player's only buy-in, ТЗ §8.3).
+func (r *ParticipantRepo) Delete(ctx context.Context, gameID int64, playerTgID int64) error {
+	_, err := r.db.Exec(ctx,
+		`DELETE FROM participants WHERE game_id = $1 AND player_tg_id = $2`,
+		gameID, playerTgID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete participant: %w", err)
+	}
+	return nil
+}

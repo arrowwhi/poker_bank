@@ -219,12 +219,15 @@ func (r *GameRepo) queryGames(ctx context.Context, query string, args ...any) ([
 
 // ListVisible возвращает игры, которые видит пользователь: в его группах или с его участием.
 // chatID = 0 — все группы; status = "" — любой статус.
+//
+// Приведение $2::bigint обязательно: по `$2 = 0` Postgres выводит тип параметра как integer,
+// и id супергруппы (-100xxxxxxxxxx) не кодируется в int4.
 func (r *GameRepo) ListVisible(ctx context.Context, tgID, chatID int64, status domain.GameStatus, limit int) ([]domain.Game, error) {
 	return r.queryGames(ctx, `
 		SELECT `+gameCols+`
 		FROM games g
-		WHERE ($2 = 0 OR g.chat_id = $2)
-		  AND ($3 = '' OR g.status = $3)
+		WHERE ($2::bigint = 0 OR g.chat_id = $2)
+		  AND ($3::text = '' OR g.status = $3)
 		  AND (g.dealer_tg_id = $1
 		       OR EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = g.chat_id AND m.player_tg_id = $1)
 		       OR EXISTS (SELECT 1 FROM participants p WHERE p.game_id = g.id AND p.player_tg_id = $1))
