@@ -28,9 +28,6 @@ import (
 // SupergroupChatID — id супергруппы Telegram: всегда вида -100xxxxxxxxxx и не помещается в int4.
 const SupergroupChatID int64 = -1001234567890
 
-// migrateLockKey — ключ advisory lock, которым тесты сериализуют запуск миграций.
-const migrateLockKey int64 = 0x706b5f7467 // "pk_tg"
-
 // Pool возвращает пул к отдельной схеме с применёнными миграциями.
 func Pool(t *testing.T) *infrapg.Pool {
 	t.Helper()
@@ -69,20 +66,31 @@ func Pool(t *testing.T) *infrapg.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	// Мигратор берёт advisory lock без ожидания и падает, если он занят. go test запускает
-	// пакеты параллельно, и все они ходят в одну базу, поэтому миграции разных схем
-	// выстраиваем в очередь своим блокирующим локом.
+	migrateUp(ctx, t, admin, pool)
+	return pool
+}
+
+// migrateLockKey — ключ advisory-блокировки, под которой тесты по очереди применяют миграции.
+const migrateLockKey int64 = 0x706774657374 // "pgtest"
+
+// migrateUp применяет миграции, дождавшись своей очереди. migrate.Up берёт advisory-блокировку
+// без ожидания и при занятой сразу возвращает ошибку, а `go test ./...` запускает пакеты
+// параллельно — без очереди тесты разных пакетов роняют друг друга.
+func migrateUp(ctx context.Context, t *testing.T, admin *pgx.Conn, pool *infrapg.Pool) {
+	t.Helper()
+
 	if _, err := admin.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockKey); err != nil {
 		t.Fatalf("lock migrations: %v", err)
 	}
-	err = migrate.Up(ctx, pool, migrations.FS, ".")
-	if _, unlockErr := admin.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrateLockKey); unlockErr != nil {
-		t.Fatalf("unlock migrations: %v", unlockErr)
-	}
-	if err != nil {
+	defer func() {
+		if _, err := admin.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrateLockKey); err != nil {
+			t.Errorf("unlock migrations: %v", err)
+		}
+	}()
+
+	if err := migrate.Up(ctx, pool, migrations.FS, "."); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return pool
 }
 
 // SeedFinishedGame создаёт игрока-дилера, группу, где он участник, и завершённую игру
