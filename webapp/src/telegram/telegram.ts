@@ -129,6 +129,12 @@ export function startChatId(): number | null {
   return Number.isFinite(n) && n !== 0 ? n : null;
 }
 
+/** id игры из deep-link `startapp=g<id>`: кнопка «Итоги в приложении» под планом переводов. */
+export function startGameId(): number | null {
+  const m = /^g(\d+)$/.exec(tg.initDataUnsafe.start_param ?? '');
+  return m ? Number(m[1]) : null;
+}
+
 export const haptic = {
   success: () => tg.HapticFeedback.notificationOccurred('success'),
   warning: () => tg.HapticFeedback.notificationOccurred('warning'),

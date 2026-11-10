@@ -4,7 +4,7 @@ import { ConfirmProvider, ErrorState, Loading, ToastProvider } from './component
 import { RouterProvider, useNav, type Route } from './router';
 import { SessionCtx } from './session';
 import { TelegramButtons, useHasMainButton } from './telegram/buttons';
-import { inTelegram, startChatId } from './telegram/telegram';
+import { inTelegram, startChatId, startGameId } from './telegram/telegram';
 import { Welcome } from './screens/Welcome';
 import { GamePicker } from './screens/GamePicker';
 import { GameScreen } from './screens/Game';
@@ -13,10 +13,15 @@ import { Profile } from './screens/Profile';
 import { LeaderboardScreen } from './screens/Leaderboard';
 import { NewGame } from './screens/NewGame';
 
-/** Начальный стек: deep-link startapp=<chat_id> открывает активную игру этого чата (или создание новой). */
+/**
+ * Начальный стек: deep-link startapp=<chat_id> открывает активную игру этого чата (или создание новой),
+ * startapp=g<id> — итоги игры.
+ */
 async function initialStack(): Promise<Route[]> {
   const chatId = startChatId();
   const home: Route = { name: 'welcome' };
+  const gameId = startGameId();
+  if (gameId) return [home, { name: 'results', id: gameId }];
   if (!chatId) return [home];
   try {
     const games = await api.listGames({ chat_id: chatId, status: 'active' });

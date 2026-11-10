@@ -5,11 +5,12 @@ import (
 )
 
 // callbackPrefixes — префиксы data inline-кнопок, которые разбирает handleCallback.
-var callbackPrefixes = []string{"cancel", "endgame", "pa", "djoin", "drebuy", "dcashout", "settle"}
+var callbackPrefixes = []string{"cancel", "endgame", "pa", "djoin", "drebuy", "dcashout", "settle", helpPrefix}
 
 // Register attaches all bot middleware and command handlers to the given bot instance.
 func (h *Handler) Register(b *tg.Bot) {
 	h.api = b.API()
+	h.botUsername = b.Username
 
 	b.Use(h.forum.Middleware(), h.UpsertPlayer, h.TopicGuard)
 
@@ -48,7 +49,7 @@ func (h *Handler) Register(b *tg.Bot) {
 		"stats":   h.handleStats,
 	}
 	for name, fn := range commands {
-		// Без описания: меню команд бот не публикует, как и раньше.
+		// Без описания: меню команд публикуется отдельно, в нужном порядке (MenuCommands).
 		b.Command(name, "", h.wrap(fn))
 	}
 
