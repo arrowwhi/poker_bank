@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -645,9 +646,27 @@ func (s *GameService) Chat(ctx context.Context, id int64) (*domain.Chat, error) 
 	return s.chats.Get(ctx, id)
 }
 
-// ChatsOf — группы, где пользователь известен боту.
-func (s *GameService) ChatsOf(ctx context.Context, tgID int64) ([]domain.Chat, error) {
-	return s.chats.ListByMember(ctx, tgID)
+// ChatsOf — группы, где пользователь известен боту, от самых популярных вниз:
+// по числу завершённых игр, при равенстве — по дате последней игры (свежая выше).
+// Остальные равные (в том числе чаты без игр) сохраняют порядок репозитория.
+func (s *GameService) ChatsOf(ctx context.Context, tgID int64) ([]domain.ChatActivity, error) {
+	chats, err := s.chats.ListByMember(ctx, tgID)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(chats, func(i, j int) bool { return morePopular(&chats[i], &chats[j]) })
+	return chats, nil
+}
+
+// morePopular сообщает, должен ли чат a стоять в списке выше чата b.
+func morePopular(a, b *domain.ChatActivity) bool {
+	if a.GamesCount != b.GamesCount {
+		return a.GamesCount > b.GamesCount
+	}
+	if a.LastGameAt == nil || b.LastGameAt == nil {
+		return a.LastGameAt != nil && b.LastGameAt == nil
+	}
+	return a.LastGameAt.After(*b.LastGameAt)
 }
 
 // IsKnownMember — пользователь известен как участник группы.
