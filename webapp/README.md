@@ -23,7 +23,11 @@ npm run typecheck
   у игрока только одна активная игра; `-1001004` — нет игры, но создать её тоже нельзя, пока Иван занят в #13.
   В picker'е buy-in занятые в других играх (@masha, @dima, @kolya, @petya_k) показаны как «Занят»);
 - без `startapp` приложение сразу открывает текущую игру пользователя, если она есть;
-- `?theme=dark|light` — тема; «···» в шапке переключает тему на лету.
+- `?theme=dark|light` — «системная» тема в браузере (вместо темы Telegram); «···» в шапке переключает тему на лету.
+
+Тему выбирает пользователь кнопкой на главном экране: как в Telegram / светлая / тёмная. Выбор лежит в `localStorage`
+(`bankir.theme`, читается inline-скриптом в `index.html` до первого рендера) и в `Telegram.WebApp.CloudStorage`.
+themeParams Telegram применяются, только пока итоговая схема совпадает с темой Telegram; иначе — палитра из `tokens.css`.
 
 Мок живёт в памяти вкладки: через ~20 с в игре #13 приходит запрос @serega (in-app баннер дилеру),
 свои запросы игрока «чужой» дилер подтверждает через ~6 с (15% — отказ).
@@ -55,7 +59,7 @@ npm run typecheck
 ```
 src/
   api/        types.ts (DTO), client.ts (интерфейс BankirApi + ApiError), http.ts (fetch), mock.ts, index.ts (выбор по env)
-  telegram/   telegram.ts (обёртка + мок WebApp, haptic, start_param), theme.ts (themeParams → токены, safe-area),
+  telegram/   telegram.ts (обёртка + мок WebApp, haptic, start_param), theme.ts (выбор темы, themeParams → токены, safe-area),
               buttons.tsx (MainButton/BackButton через стек владельцев, браузерные заглушки)
   lib/        format.ts, rate.ts (пропорциональность, chips*rate ∈ ℤ), stats.ts (серии, график), settle.ts (§9 для мока), hooks.ts
   components/ ui.tsx (базовые: Sheet, Confirm, Toast, Segmented…), domain.tsx (PlayerRow, RequestCard, GameCard, NetChart…)

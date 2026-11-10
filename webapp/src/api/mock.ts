@@ -343,12 +343,15 @@ export class MockApi implements BankirApi {
     // Как на бэкенде: по числу завершённых игр, при равенстве — по дате последней игры.
     return clone(CHATS.filter((c) => c.members.includes(ME)).map((c) => {
       const active = this.games.find((g) => g.chat_id === c.id && g.status === 'active');
-      const last = this.games.filter((g) => g.chat_id === c.id).sort((a, b) => b.started_at - a.started_at)[0];
+      // Как на бэкенде: прошлая игра — последняя завершённая, иначе последняя отменённая.
+      const lastOf = (s: GameStatus) => this.games.filter((g) => g.chat_id === c.id && g.status === s).sort((a, b) => b.started_at - a.started_at)[0];
+      const last = lastOf('finished') ?? lastOf('cancelled');
       const finished = this.games.filter((g) => g.chat_id === c.id && g.status === 'finished');
       const lastEnded = finished.reduce((m, g) => Math.max(m, g.ended_at ?? 0), 0);
       return {
         id: c.id, title: c.title, members_count: c.members.length,
-        active_game: active ? { id: active.id, dealer: u(active.dealer) } : null, last_rate: last?.rate ?? null,
+        active_game: active ? { id: active.id, dealer: u(active.dealer) } : null,
+        last_game: last ? { id: last.id, number: last.number, started_at: iso(last.started_at), rate: last.rate } : null,
         games_count: finished.length, last_game_at: lastEnded ? iso(lastEnded) : null,
       };
     }).sort((a, b) => b.games_count - a.games_count || (b.last_game_at ?? '').localeCompare(a.last_game_at ?? '')));

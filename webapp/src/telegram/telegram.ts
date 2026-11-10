@@ -70,6 +70,11 @@ export interface WebApp {
     selectionChanged(): void;
   };
   openTelegramLink?(url: string): void;
+  /** Bot API 6.9+: хранилище «ключ → строка», общее для устройств пользователя. */
+  CloudStorage?: {
+    setItem(key: string, value: string, cb?: (err: string | null, ok?: boolean) => void): void;
+    getItem(key: string, cb: (err: string | null, value?: string) => void): void;
+  };
 }
 
 declare global {
@@ -127,6 +132,12 @@ export function startChatId(): number | null {
   if (!p) return null;
   const n = Number(p);
   return Number.isFinite(n) && n !== 0 ? n : null;
+}
+
+/** id игры из deep-link `startapp=g<id>`: кнопка «Итоги в приложении» под планом переводов. */
+export function startGameId(): number | null {
+  const m = /^g(\d+)$/.exec(tg.initDataUnsafe.start_param ?? '');
+  return m ? Number(m[1]) : null;
 }
 
 export const haptic = {

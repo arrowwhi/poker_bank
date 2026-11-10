@@ -111,6 +111,7 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 	a.Health().Register("telegram", bot.Healthcheck)
 
 	h := telegram.NewHandler(forum, gameSvc, playerSvc, pendingSvc, fsmRepo, chatTopicRepo, log)
+	h.SetWebAppShortName(cfg.WebAppShortName)
 	h.Register(bot)
 
 	// HTTP: API Mini App, фронтенд и (в режиме webhook) обновления Telegram.
@@ -145,7 +146,7 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 
 	log.Info("starting poker-bank", zap.String("telegram_mode", cfg.TelegramMode), zap.String("http_port", cfg.HTTPPort))
 
-	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc, h))
+	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc, h), publishMenuJob(client, log))
 }
 
 // expirePendingJob раз в минуту переводит старые pending-запросы в expired
@@ -163,6 +164,20 @@ func expirePendingJob(pending *service.PendingService, h *telegram.Handler) tg.C
 				h.RequestsClosed(ctx, pending.ExpirePending(ctx, pendingTTL))
 			}
 		}
+	}
+}
+
+// publishMenuJob публикует меню команд Telegram при старте. Меню — косметика:
+// ошибка только логируется, компонент живёт до остановки сервиса.
+func publishMenuJob(client *tg.Client, log *zap.Logger) tg.ComponentFunc {
+	return func(ctx context.Context) error {
+		if err := client.SetMyCommands(ctx, telegram.MenuCommands()); err != nil && ctx.Err() == nil {
+			log.Warn("set bot commands", zap.Error(err))
+		}
+
+		<-ctx.Done()
+
+		return nil
 	}
 }
 
@@ -192,7 +207,7 @@ func botConfig(cfg *config.Config) tg.Config {
 	bc := tg.DefaultConfig(cfg.TelegramToken)
 	bc.API.BaseURL = cfg.TelegramAPIURL
 	bc.Mode = cfg.TelegramMode
-	// Меню команд бот раньше не публиковал; описания у команд не заданы.
+	// Меню публикует publishMenuJob — в своём порядке, а не по алфавиту, как библиотека.
 	bc.SetCommands = false
 
 	bc.Webhook.URL = cfg.PublicURL + cfg.TelegramWebhookPath

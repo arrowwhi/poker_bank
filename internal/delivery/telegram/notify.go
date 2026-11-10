@@ -118,7 +118,7 @@ func (h *Handler) GameFinished(ctx context.Context, g *domain.Game, res *service
 		h.Announce(ctx, g.ChatID, emptyGameCancelledText(g.ID))
 		return
 	}
-	m, err := h.sendToChat(ctx, g.ChatID, h.buildEndGameMessage(ctx, g.ID, res.BankRub, res.Settlements), settleMarkup(g.ID, res.Settlements))
+	m, err := h.sendToChat(ctx, g.ChatID, h.buildEndGameMessage(ctx, g.ID, res.BankRub, res.Settlements), h.settleMarkup(g.ID, res.Settlements))
 	if err != nil {
 		h.log.Warn("send end game message", zap.Error(err), zap.Int64("game_id", g.ID))
 		return
@@ -143,7 +143,7 @@ func (h *Handler) SettlementsChanged(ctx context.Context, g *domain.Game) {
 		h.log.Warn("list settlements", zap.Error(err), zap.Int64("game_id", g.ID))
 		return
 	}
-	h.editInChat(ctx, g.ChatID, *msgID, h.buildEndGameMessage(ctx, g.ID, g.BankDeltaRub, settlements), settleMarkup(g.ID, settlements))
+	h.editInChat(ctx, g.ChatID, *msgID, h.buildEndGameMessage(ctx, g.ID, g.BankDeltaRub, settlements), h.settleMarkup(g.ID, settlements))
 }
 
 // RequestApplied сообщает о действии, записанном без подтверждения (дилер сам себе).
@@ -153,11 +153,27 @@ func (h *Handler) RequestApplied(ctx context.Context, g *domain.Game, pa *domain
 
 // GameCreated публикует в группе сводку игры, начатой из Mini App.
 func (h *Handler) GameCreated(ctx context.Context, g *domain.Game) {
-	h.Announce(ctx, g.ChatID, fmt.Sprintf(
-		"🎰 Игра #%d начата!\nДилер: %s\nBuy-in: %d₽ → %d фишек\nRebuy: %d₽ → %d фишек\nКурс: %s₽/фишка",
-		g.ID, h.name(ctx, g.DealerTgID), g.BuyInRub, g.BuyInChips, g.RebuyRub, g.RebuyChips,
-		formatRate(g.BuyInRub, g.BuyInChips),
-	))
+	if _, err := h.sendToChat(ctx, g.ChatID, h.gameStartedText(g, h.name(ctx, g.DealerTgID)), h.gameStartedMarkup(g)); err != nil {
+		h.log.Warn("announce new game", zap.Error(err), zap.Int64("chat_id", g.ChatID))
+	}
+}
+
+// gameStartedText — сводка новой игры: одна и та же для /newgame и старта из Mini App.
+func (h *Handler) gameStartedText(g *domain.Game, dealer string) string {
+	entry := "Вход — /join"
+	if h.webAppLink("") != "" {
+		entry += " или в приложении 👇"
+	}
+	return fmt.Sprintf(
+		"🎰 Игра #%d началась!\n\n🎩 Дилер: %s\n💵 Buy-in: %d₽ → %d фишек\n🔁 Rebuy: %d₽ → %d фишек\n⚖️ Курс: %s₽ за фишку\n\n%s",
+		g.ID, dealer, g.BuyInRub, g.BuyInChips, g.RebuyRub, g.RebuyChips,
+		formatRate(g.BuyInRub, g.BuyInChips), entry,
+	)
+}
+
+// gameStartedMarkup — кнопка, открывающая стол этой игры в приложении.
+func (h *Handler) gameStartedMarkup(g *domain.Game) *Markup {
+	return h.withAppButton(nil, btnOpenTable, chatStartParam(g.ChatID))
 }
 
 // PlayerName — @username или имя игрока.

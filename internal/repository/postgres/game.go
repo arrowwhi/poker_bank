@@ -235,10 +235,12 @@ func (r *GameRepo) ListVisible(ctx context.Context, tgID, chatID int64, status d
 		LIMIT $4`, tgID, chatID, string(status), limit)
 }
 
-// GetLastByChat — последняя игра в группе (для пресета «как в прошлый раз»); nil, если игр не было.
-func (r *GameRepo) GetLastByChat(ctx context.Context, chatID int64) (*domain.Game, error) {
+// GetLastByChatStatus — последняя по started_at игра группы в заданном статусе; nil, если таких нет.
+func (r *GameRepo) GetLastByChatStatus(ctx context.Context, chatID int64, status domain.GameStatus) (*domain.Game, error) {
 	games, err := r.queryGames(ctx, `
-		SELECT `+gameCols+` FROM games g WHERE g.chat_id = $1 ORDER BY g.started_at DESC LIMIT 1`, chatID)
+		SELECT `+gameCols+` FROM games g
+		WHERE g.chat_id = $1 AND g.status = $2
+		ORDER BY g.started_at DESC LIMIT 1`, chatID, string(status))
 	if err != nil || len(games) == 0 {
 		return nil, err
 	}

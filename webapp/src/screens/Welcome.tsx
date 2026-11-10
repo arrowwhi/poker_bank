@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { api } from '../api';
 import { useAsync } from '../lib/hooks';
 import { Avatar, Badge, ListRow, Screen } from '../components/ui';
+import { ThemeButton } from '../components/ThemeButton';
 import { handle, plural, rub, signedRub, time } from '../lib/format';
 import { useNav } from '../router';
 import { useSession } from '../session';
@@ -71,6 +72,8 @@ export function Welcome() {
             onClick={() => nav.push({ name: 'leaderboard', chatId: mainChat })} />
         )}
       </div>
+
+      <ThemeButton />
     </Screen>
   );
 }

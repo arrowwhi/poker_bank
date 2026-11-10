@@ -7,6 +7,22 @@
     <title>Банкир</title>
     <!-- Официальный SDK Telegram Mini Apps: создаёт window.Telegram.WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+    <!-- Тема до первого рендера (без мигания): сохранённый выбор, иначе тема Telegram / системы.
+         Ключ и логика — как в src/telegram/theme.ts, который затем применяет themeParams. -->
+    <script>
+      (function () {
+        try {
+          var pref = null;
+          try { pref = localStorage.getItem('bankir.theme'); } catch (e) {}
+          var tg = window.Telegram && window.Telegram.WebApp;
+          var qs = new URLSearchParams(location.search).get('theme');
+          var system = tg && tg.initData ? tg.colorScheme
+            : qs === 'dark' || qs === 'light' ? qs
+            : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.dataset.theme = pref === 'light' || pref === 'dark' ? pref : system;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

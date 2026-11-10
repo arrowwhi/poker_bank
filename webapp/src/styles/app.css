@@ -145,6 +145,19 @@ button.list-row:active { background: var(--bg-elevated); }
 }
 .segmented button.on { background: var(--bg-surface); color: var(--text-primary); font-weight: 600; box-shadow: 0 1px 3px #0000001a; }
 
+/* ── кнопка темы: один значок, по нажатию раскрывается в три ── */
+.theme-switch { display: flex; align-items: center; gap: 10px; }
+.theme-pill { display: inline-flex; padding: 3px; border-radius: 18px; background: var(--bg-surface); box-shadow: 0 1px 3px #00000014; }
+.theme-pill button {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; overflow: hidden;
+  color: var(--text-secondary); transition: width .22s cubic-bezier(.2,.8,.2,1), margin .22s cubic-bezier(.2,.8,.2,1), opacity .15s, background .15s, color .15s;
+}
+.theme-switch:not(.open) .theme-pill button:not(.on) { width: 0; opacity: 0; pointer-events: none; }
+.theme-switch.open .theme-pill button + button { margin-left: 2px; }
+.theme-switch.open .theme-pill button.on { background: var(--accent-soft); color: var(--accent-primary); }
+.theme-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); opacity: 0; transform: translateX(-4px); transition: opacity .18s, transform .18s; pointer-events: none; }
+.theme-switch.open .theme-label { opacity: 1; transform: none; }
+
 /* ── chips ── */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
@@ -152,6 +165,28 @@ button.list-row:active { background: var(--bg-elevated); }
   border: 1px solid transparent;
 }
 .chip.on { background: var(--accent-soft); color: var(--accent-primary); border-color: var(--accent-primary); }
+
+/* ── новая игра: «как в прошлый раз» + стандартные пресеты ── */
+.group { display: flex; flex-direction: column; gap: 8px; }
+.group-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+.presets .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.presets .chip { padding: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lastgame {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: 14px; background: var(--bg-surface); border: 1.5px solid transparent;
+  transition: background .15s, border-color .15s;
+}
+.lastgame.on { background: var(--accent-soft); border-color: var(--accent-primary); }
+.lastgame-icon {
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0;
+  background: var(--bg-elevated); color: var(--text-secondary); transition: background .15s, color .15s;
+}
+.lastgame.on .lastgame-icon { background: var(--accent-primary); color: var(--text-on-accent); }
+.lastgame-title { display: block; font-size: 16px; font-weight: 600; }
+.lastgame-sub { display: block; font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.lastgame .radio { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--text-hint); flex-shrink: 0; display: grid; place-items: center; }
+.lastgame.on .radio { border: 2px solid var(--accent-primary); }
+.lastgame.on .radio::after { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--accent-primary); }
 
 /* ── выпадающий список ── */
 .select { position: relative; }

@@ -83,26 +83,22 @@ func (h *Handler) newGameFromArgs(c *Context, ctx context.Context, chatID, sende
 
 // createGame записывает игру в БД и отправляет сводку в чат.
 func (h *Handler) createGame(c *Context, ctx context.Context, chatID, dealerID int64, buyInRub, buyInChips, rebuyRub, rebuyChips int) error {
-	id, err := h.game.NewGame(ctx, &domain.Game{
+	g := &domain.Game{
 		ChatID:     chatID,
 		DealerTgID: dealerID,
 		BuyInRub:   buyInRub,
 		BuyInChips: buyInChips,
 		RebuyRub:   rebuyRub,
 		RebuyChips: rebuyChips,
-	})
+	}
+	id, err := h.game.NewGame(ctx, g)
 	if err != nil {
 		h.log.Error("создание игры", zap.Error(err))
 		return c.Reply("Ошибка при создании игры.")
 	}
 
-	return c.Reply(fmt.Sprintf(
-		"🎰 Игра #%d начата!\nДилер: %s\nBuy-in: %d₽ → %d фишек\nRebuy: %d₽ → %d фишек\nКурс: %s₽/фишка",
-		id, playerName(c.Sender(), dealerID),
-		buyInRub, buyInChips,
-		rebuyRub, rebuyChips,
-		formatRate(buyInRub, buyInChips),
-	))
+	g.ID = id
+	return c.Reply(h.gameStartedText(g, playerName(c.Sender(), dealerID)), h.gameStartedMarkup(g))
 }
 
 // handleText обрабатывает текстовые сообщения для FSM-состояний (пошаговый /newgame).
@@ -232,7 +228,7 @@ func (h *Handler) doEndGame(c *Context, force bool) error {
 	if res.Cancelled {
 		return c.Reply(emptyGameCancelledText(game.ID))
 	}
-	m, err := c.ReplyMessage(h.buildEndGameMessage(ctx, game.ID, res.BankRub, res.Settlements), settleMarkup(game.ID, res.Settlements))
+	m, err := c.ReplyMessage(h.buildEndGameMessage(ctx, game.ID, res.BankRub, res.Settlements), h.settleMarkup(game.ID, res.Settlements))
 	if err != nil {
 		return err
 	}
@@ -589,7 +585,11 @@ func (h *Handler) handleStatus(c *Context) error {
 
 	game, err := h.game.GetActiveGame(ctx, c.Chat().ID)
 	if errors.Is(err, service.ErrNoActiveGame) {
-		return c.Reply("Нет активной игры.")
+		chatParam := chatStartParam(c.Chat().ID)
+		if h.webAppLink(chatParam) == "" {
+			return c.Reply("Сейчас игры нет. Начать — /newgame.")
+		}
+		return c.Reply("Сейчас игры нет. Начать — /newgame или в приложении.", h.withAppButton(nil, btnOpenApp, chatParam))
 	}
 	if err != nil {
 		return err
@@ -644,11 +644,10 @@ func (h *Handler) handleStatus(c *Context) error {
 	dealer, _ := h.player.GetByID(ctx, game.DealerTgID)
 
 	sb := strings.Builder{}
-	fmt.Fprintf(&sb, "🎮 Игра #%d\n", game.ID)
-	fmt.Fprintf(&sb, "Дилер: %s\n", formatPlayerByID(dealer, game.DealerTgID))
-	fmt.Fprintf(&sb, "Курс: %s₽/фишку | Buy-in: %d₽ | Rebuy: %d₽\n",
-		formatRate(game.BuyInRub, game.BuyInChips), game.BuyInRub, game.RebuyRub)
+	fmt.Fprintf(&sb, "🎰 Игра #%d · дилер %s\n", game.ID, formatPlayerByID(dealer, game.DealerTgID))
 	fmt.Fprintf(&sb, "💰 Банк: %d₽\n", bank)
+	fmt.Fprintf(&sb, "⚖️ %s₽/фишка · buy-in %d₽ · rebuy %d₽\n",
+		formatRate(game.BuyInRub, game.BuyInChips), game.BuyInRub, game.RebuyRub)
 
 	var active, out []domain.Participant
 	for _, p := range participants {
@@ -700,15 +699,15 @@ func (h *Handler) handleStatus(c *Context) error {
 	}
 
 	// Если все вышли и вызывает дилер — предлагаем завершить игру
+	var markup *Markup
 	if len(active) == 0 && len(out) > 0 && game.DealerTgID == c.Sender().ID {
-		markup := &Markup{InlineKeyboard: [][]Button{{
+		markup = &Markup{InlineKeyboard: [][]Button{{
 			{Text: "🏁 Завершить игру", CallbackData: fmt.Sprintf("endgame:%d", game.ID)},
 		}},
 		}
-		return c.Reply(sb.String(), markup)
 	}
 
-	return c.Reply(sb.String())
+	return c.Reply(sb.String(), h.withAppButton(markup, btnOpenTable, chatStartParam(game.ChatID)))
 }
 
 // handleMe показывает личные показатели пользователя в текущей игре.
@@ -824,7 +823,7 @@ func (h *Handler) handleHistory(c *Context) error {
 		sb.WriteByte('\n')
 	}
 
-	return c.Reply(sb.String())
+	return c.Reply(sb.String(), h.withAppButton(nil, btnOpenApp, chatStartParam(c.Chat().ID)))
 }
 
 // gameLogLimit — сколько последних событий ledger показывать в /game (лимит сообщения Telegram).
@@ -962,7 +961,7 @@ func (h *Handler) statsLeaderboard(c *Context, ctx context.Context, chatID int64
 		fmt.Fprintf(&sb, "%d. %s — %+d₽ (%d игр, win-rate %d%%)\n",
 			i+1, name, s.TotalNetRub, s.GameCount, winRate)
 	}
-	return c.Reply(sb.String())
+	return c.Reply(sb.String(), h.withAppButton(nil, btnOpenApp, chatStartParam(chatID)))
 }
 
 func (h *Handler) statsPlayer(c *Context, ctx context.Context, chatID int64, username string) error {
@@ -1020,6 +1019,8 @@ func (h *Handler) handleCallback(c *Context) error {
 		return h.handleDealerCashOutCallback(c, parts)
 	case "settle":
 		return h.handleSettleCallback(c, parts)
+	case helpPrefix:
+		return h.handleHelpCallback(c, parts)
 	}
 	return c.Respond()
 }
@@ -1127,7 +1128,7 @@ func (h *Handler) handleEndGameCallback(c *Context, parts []string) error {
 		_ = c.Edit(emptyGameCancelledText(gameID))
 		return c.Respond()
 	}
-	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, res.BankRub, res.Settlements), settleMarkup(gameID, res.Settlements))
+	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, res.BankRub, res.Settlements), h.settleMarkup(gameID, res.Settlements))
 	if m := c.Callback().Message; m != nil {
 		h.rememberSettleMessage(ctx, gameID, m.MessageID)
 	}
@@ -1177,8 +1178,8 @@ func (h *Handler) handleSettleCallback(c *Context, parts []string) error {
 		return c.Respond(&CallbackResponse{Text: "Вас нет в переводах этой игры."})
 	}
 
-	// Когда все расчёты закрыты, settleMarkup == nil и правка без клавиатуры убирает кнопку.
-	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, game.BankDeltaRub, settlements), settleMarkup(gameID, settlements))
+	// Когда все расчёты закрыты, кнопка отметки пропадает, остаётся только ссылка на приложение.
+	_ = c.Edit(h.buildEndGameMessage(ctx, gameID, game.BankDeltaRub, settlements), h.settleMarkup(gameID, settlements))
 	return c.Respond(&CallbackResponse{Text: "Отмечено ✅"})
 }
 
@@ -1365,8 +1366,11 @@ func (h *Handler) buildEndGameMessage(ctx context.Context, gameID int64, bankDel
 			settleMark(s.IsReceived), formatPlayerByID(to, s.ToTgID),
 			s.AmountRub)
 	}
-	if allSettled(settlements) {
+	switch {
+	case allSettled(settlements):
 		sb.WriteString("\n✅ Все расчёты закрыты.")
+	case h.webAppLink("") != "":
+		sb.WriteString("\nОтметьте перевод кнопкой ниже или в приложении.")
 	}
 	return sb.String()
 }
@@ -1388,16 +1392,16 @@ func allSettled(settlements []domain.Settlement) bool {
 	return true
 }
 
-// settleMarkup возвращает кнопку отметки оплаты/получения или nil,
-// если переводов нет или все они уже закрыты.
-func settleMarkup(gameID int64, settlements []domain.Settlement) *Markup {
-	if len(settlements) == 0 || allSettled(settlements) {
-		return nil
+// settleMarkup возвращает клавиатуру под планом переводов: кнопку отметки оплаты/получения
+// (пока есть незакрытые переводы) и ссылку на итоги игры в приложении. nil — если нет ни того, ни другого.
+func (h *Handler) settleMarkup(gameID int64, settlements []domain.Settlement) *Markup {
+	var m *Markup
+	if len(settlements) > 0 && !allSettled(settlements) {
+		m = &Markup{InlineKeyboard: [][]Button{{
+			{Text: "✅ Я оплатил / получил", CallbackData: fmt.Sprintf("settle:%d", gameID)},
+		}}}
 	}
-	return &Markup{InlineKeyboard: [][]Button{{
-		{Text: "✅ Я оплатил / получил", CallbackData: fmt.Sprintf("settle:%d", gameID)},
-	}},
-	}
+	return h.withAppButton(m, btnAppResults, gameStartParam(gameID))
 }
 
 // --- форматирование ---
