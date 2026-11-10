@@ -672,8 +672,3 @@ func (s *GameService) ChatMembers(ctx context.Context, chatID int64) ([]domain.P
 func (s *GameService) CountChatMembers(ctx context.Context, chatID int64) (int, error) {
 	return s.chats.CountMembers(ctx, chatID)
 }
-
-// ClosePending отменяет висящие запросы игры и возвращает их.
-func (s *GameService) ClosePending(ctx context.Context, gameID int64) ([]domain.PendingAction, error) {
-	return s.pending.CancelByGame(ctx, gameID)
-}

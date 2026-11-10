@@ -19,6 +19,7 @@ type memDB struct {
 	games        []domain.Game
 	ledger       []domain.LedgerEntry
 	participants []domain.Participant
+	pending      []domain.PendingAction
 	nextID       int64
 
 	// failParticipantCreate — ошибка записи участника (проверка атомарности).
@@ -225,9 +226,11 @@ func (r memParticipants) Delete(_ context.Context, gameID, tgID int64) error {
 	return nil
 }
 
-// memPending — запросов в сценариях нет: дилер действует сам.
+// memPending — запросы в сценариях не создаются (дилер действует сам); висящие
+// запросы кладутся в memDB.pending напрямую.
 type memPending struct {
 	interfaces.PendingActionRepository
+	db *memDB
 }
 
 func (memPending) GetPending(context.Context, int64, int64, domain.ActionType) (*domain.PendingAction, error) {
@@ -236,8 +239,17 @@ func (memPending) GetPending(context.Context, int64, int64, domain.ActionType) (
 func (memPending) CancelByPlayer(context.Context, int64, int64) ([]domain.PendingAction, error) {
 	return nil, nil
 }
-func (memPending) CancelByGame(context.Context, int64) ([]domain.PendingAction, error) {
-	return nil, nil
+func (r memPending) CancelByGame(_ context.Context, gameID int64) ([]domain.PendingAction, error) {
+	var cancelled, rest []domain.PendingAction
+	for _, pa := range r.db.pending {
+		if pa.GameID == gameID && pa.Status == domain.PendingStatusPending {
+			pa.Status = domain.PendingStatusCancelled
+			cancelled = append(cancelled, pa)
+		}
+		rest = append(rest, pa)
+	}
+	r.db.pending = rest
+	return cancelled, nil
 }
 
 type memSettlements struct {
@@ -257,7 +269,7 @@ func newFlowService() (*GameService, *memDB) {
 	db := &memDB{}
 	return NewGameService(
 		memGames{db: db}, memLedger{db}, memParticipants{db},
-		nil, memSettlements{}, memPending{}, nil, db,
+		nil, memSettlements{}, memPending{db: db}, nil, db,
 		NewNoopSheetsExporter(), zap.NewNop(),
 	), db
 }
@@ -357,6 +369,65 @@ func TestEndGameAfterUndoneBuyInCancels(t *testing.T) {
 	mustStatus(t, s, g.ID, domain.GameStatusCancelled)
 
 	newTable(t, s)
+}
+
+// Пустая игра отменяется и через /endgame, и через /endgame_force (бот идёт тем же
+// путём, что Mini App); висящие запросы возвращаются, чтобы поправить их сообщения.
+func TestEndGameOfEmptyGameCancelsAndClosesPending(t *testing.T) {
+	ctx := context.Background()
+
+	for _, force := range []bool{false, true} {
+		s, db := newFlowService()
+		g, err := s.CreateGameIn(ctx, testChat, testDealer, 1000, 1000, 1000, 1000, false)
+		if err != nil {
+			t.Fatalf("create game: %v", err)
+		}
+		db.pending = append(db.pending, domain.PendingAction{
+			ID: db.id(), GameID: g.ID, ActionType: domain.ActionJoin,
+			RequesterTgID: 7, TargetTgID: 7, Status: domain.PendingStatusPending, ChatID: testChat,
+		})
+
+		res, err := s.EndGame(ctx, g, testDealer, force)
+		if err != nil {
+			t.Fatalf("force=%v: end: %v", force, err)
+		}
+		if !res.Cancelled || len(res.Settlements) != 0 {
+			t.Fatalf("force=%v: res = %+v, want cancelled without settlements", force, res)
+		}
+		if len(res.CancelledPending) != 1 || res.CancelledPending[0].TargetTgID != 7 {
+			t.Fatalf("force=%v: cancelled pending = %+v, want the join request", force, res.CancelledPending)
+		}
+		mustStatus(t, s, g.ID, domain.GameStatusCancelled)
+	}
+}
+
+// Отказы, на которые опирается бот: активные игроки и расхождение банка;
+// с force расхождение принимается и игра завершается.
+func TestEndGameRefusalsAndForce(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newFlowService()
+	g := newTable(t, s)
+
+	var active *ActiveParticipantsError
+	if _, err := s.EndGame(ctx, g, testDealer, true); !errors.As(err, &active) ||
+		len(active.PlayerIDs) != 1 || active.PlayerIDs[0] != testDealer {
+		t.Fatalf("end with active player err = %v, want ActiveParticipantsError for dealer", err)
+	}
+
+	if _, err := s.DealerCashOut(ctx, g, testDealer, testDealer, 400); err != nil {
+		t.Fatal(err)
+	}
+	var mismatch *BankMismatchError
+	if _, err := s.EndGame(ctx, g, testDealer, false); !errors.As(err, &mismatch) || mismatch.BankRub != 600 {
+		t.Fatalf("end with bank mismatch err = %v, want BankMismatchError +600", err)
+	}
+	mustStatus(t, s, g.ID, domain.GameStatusActive)
+
+	res, err := s.EndGame(ctx, g, testDealer, true)
+	if err != nil || res.Cancelled || res.BankRub != 600 {
+		t.Fatalf("forced end = %+v, %v; want finished with bank 600", res, err)
+	}
+	mustStatus(t, s, g.ID, domain.GameStatusFinished)
 }
 
 // Игра и buy-in дилера создаются одной транзакцией: если buy-in не записался,
