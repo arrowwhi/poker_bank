@@ -2,7 +2,7 @@
 // управляет кнопкой. В Telegram — нативные кнопки, в браузере — HTML-заглушки той же формы.
 import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { inTelegram, tg } from './telegram';
-import { toggleDevTheme, useThemeVersion } from './theme';
+import { toggleDevTheme, useFullscreen, useThemeVersion } from './theme';
 
 function createStack<T>() {
   // prio: базовые владельцы (роутер) = 0, экраны/шторки = 1. Верх — максимальный prio, среди равных — последний.
@@ -125,18 +125,38 @@ function FallbackMain() {
   );
 }
 
-/** Браузерная заглушка шапки Telegram с «‹ Назад». */
-export function FallbackHeader({ title, subtitle, onMenu }: { title: string; subtitle?: string; onMenu?: () => void }) {
+/**
+ * Шапка экрана. В Telegram с его собственной шапкой не нужна. В fullscreen — полоса под статус-баром
+ * с заголовком между плавающими кнопками Telegram (`overlay` — без фона и заголовка, для экрана со столом).
+ * В браузере — заглушка шапки Telegram с «‹ Назад».
+ */
+export function FallbackHeader({ title, subtitle, onMenu, overlay }: { title: string; subtitle?: string; onMenu?: () => void; overlay?: boolean }) {
   const back = useTop(backStack);
+  const fullscreen = useFullscreen();
+  const onBack = back ?? (() => tg.close());
+  const menu = onMenu ?? toggleDevTheme;
+  if (fullscreen) {
+    if (inTelegram && overlay) return null;
+    return (
+      <div className={`fs-bar ${overlay ? 'overlay' : ''}`}>
+        <div className="fs-bar-row">
+          {/* В Telegram эти кнопки рисует сам клиент — в браузере их заменяют заглушки. */}
+          {!inTelegram && <button className="fs-pill" onClick={onBack}>{back ? '‹ Назад' : '✕ Закрыть'}</button>}
+          {!overlay && <div className="fs-bar-title">{title}</div>}
+          {!inTelegram && <button className="fs-pill right" onClick={menu} title="Сменить тему (dev)" aria-label="Сменить тему">···</button>}
+        </div>
+      </div>
+    );
+  }
   if (inTelegram) return null;
   return (
     <div className="tg-header">
-      <button className="tg-header-side" onClick={back ?? (() => tg.close())}>{back ? '‹ Назад' : 'Закрыть'}</button>
+      <button className="tg-header-side" onClick={onBack}>{back ? '‹ Назад' : 'Закрыть'}</button>
       <div className="tg-header-title">
         <div>{title}</div>
         {subtitle && <small>{subtitle}</small>}
       </div>
-      <button className="tg-header-side right" onClick={onMenu ?? toggleDevTheme} title="Сменить тему (dev)" aria-label="Сменить тему">···</button>
+      <button className="tg-header-side right" onClick={menu} title="Сменить тему (dev)" aria-label="Сменить тему">···</button>
     </div>
   );
 }

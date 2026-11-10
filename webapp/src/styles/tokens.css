@@ -21,6 +21,10 @@
   --status-warning-soft: #fff4dc;
   --brand-dealer: #c08a00;
   --brand-felt: #1e7a4c;
+  --brand-felt-light: #2a9460;
+  --brand-felt-shade: #145a37;
+  --brand-rail: #5b3d26;
+  --brand-rail-light: #80583a;
   --overlay-scrim: #00000066;
   color-scheme: light;
 }
@@ -45,6 +49,10 @@
   --status-warning-soft: #3d3220;
   --brand-dealer: #e8b730;
   --brand-felt: #1b6b44;
+  --brand-felt-light: #238055;
+  --brand-felt-shade: #0f4a2d;
+  --brand-rail: #3f2b1c;
+  --brand-rail-light: #5e4129;
   --overlay-scrim: #00000099;
   color-scheme: dark;
 }
@@ -59,6 +67,7 @@
   --safe-bottom: 0px;
   --safe-left: 0px;
   --safe-right: 0px;
+  --content-top: 0px;
   --vh-stable: 100vh;
   --mainbar-h: 0px;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

@@ -47,12 +47,16 @@ export interface WebApp {
   colorScheme: 'light' | 'dark';
   themeParams: ThemeParams;
   isExpanded: boolean;
+  /** Bot API 8.0+: приложение развёрнуто на весь экран, шапки Telegram нет. */
+  isFullscreen?: boolean;
   viewportHeight: number;
   viewportStableHeight: number;
   safeAreaInset?: Inset;
   contentSafeAreaInset?: Inset;
   ready(): void;
   expand(): void;
+  requestFullscreen?(): void;
+  exitFullscreen?(): void;
   close(): void;
   isVersionAtLeast(v: string): boolean;
   setHeaderColor?(c: string): void;
@@ -85,6 +89,8 @@ function createMock(): WebApp {
   const qs = new URLSearchParams(location.search);
   const dark = qs.get('theme') ? qs.get('theme') === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   const noop = () => {};
+  // ?fullscreen=1 эмулирует fullscreen-режим телефона: статус-бар 47px + зона кнопок Telegram 46px.
+  const fs = qs.get('fullscreen') === '1';
   const btn = (): BottomButton => {
     const b: BottomButton = {
       text: '', isVisible: false, isActive: true,
@@ -112,6 +118,9 @@ function createMock(): WebApp {
     isExpanded: true,
     viewportHeight: innerHeight,
     viewportStableHeight: innerHeight,
+    isFullscreen: fs,
+    safeAreaInset: { top: fs ? 47 : 0, bottom: 0, left: 0, right: 0 },
+    contentSafeAreaInset: { top: fs ? 46 : 0, bottom: 0, left: 0, right: 0 },
     ready: noop, expand: noop, close: noop,
     isVersionAtLeast: () => false,
     onEvent: noop, offEvent: noop,
