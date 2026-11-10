@@ -145,6 +145,19 @@ button.list-row:active { background: var(--bg-elevated); }
 }
 .segmented button.on { background: var(--bg-surface); color: var(--text-primary); font-weight: 600; box-shadow: 0 1px 3px #0000001a; }
 
+/* ── кнопка темы: один значок, по нажатию раскрывается в три ── */
+.theme-switch { display: flex; align-items: center; gap: 10px; }
+.theme-pill { display: inline-flex; padding: 3px; border-radius: 18px; background: var(--bg-surface); box-shadow: 0 1px 3px #00000014; }
+.theme-pill button {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; overflow: hidden;
+  color: var(--text-secondary); transition: width .22s cubic-bezier(.2,.8,.2,1), margin .22s cubic-bezier(.2,.8,.2,1), opacity .15s, background .15s, color .15s;
+}
+.theme-switch:not(.open) .theme-pill button:not(.on) { width: 0; opacity: 0; pointer-events: none; }
+.theme-switch.open .theme-pill button + button { margin-left: 2px; }
+.theme-switch.open .theme-pill button.on { background: var(--accent-soft); color: var(--accent-primary); }
+.theme-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); opacity: 0; transform: translateX(-4px); transition: opacity .18s, transform .18s; pointer-events: none; }
+.theme-switch.open .theme-label { opacity: 1; transform: none; }
+
 /* ── chips ── */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
