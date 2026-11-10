@@ -26,6 +26,10 @@ let scheme: Scheme = 'light';
 let version = 0;
 /** Пользователь менял тему в этой сессии — запоздавший ответ CloudStorage её уже не перекрывает. */
 let touched = false;
+/** Настоящий fullscreen (Bot API 8.0+): шапки Telegram нет, контент лежит под статус-баром и кнопками Telegram. */
+let fullscreen = false;
+/** CSS-токен цвета под статус-баром в fullscreen; null — фон страницы. Экран со столом ставит сукно. */
+let headerTint: string | null = null;
 const subs = new Set<() => void>();
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 
@@ -88,6 +92,8 @@ function applyTheme() {
         if (tg.isVersionAtLeast('6.1')) tg.setBackgroundColor?.(page);
         if (tg.isVersionAtLeast('7.10')) tg.setBottomBarColor?.(bar);
       }
+      // В fullscreen шапка прозрачная: её цвет задаёт только оформление статус-бара.
+      if (fullscreen) tg.setHeaderColor?.(cssVar(headerTint ?? '--bg-secondary'));
     } catch { /* старый клиент */ }
   }
 
@@ -128,12 +134,44 @@ export function useThemeVersion(): number {
   return useSyncExternalStore(subscribe, () => version);
 }
 
+/** true — приложение в fullscreen; компонент перерисовывается при входе и выходе. */
+export function useFullscreen(): boolean {
+  useSyncExternalStore(subscribe, () => version);
+  return fullscreen;
+}
+
+/** Цвет под статус-баром в fullscreen (имя CSS-токена) на время жизни экрана; null — вернуть фон страницы. */
+export function setHeaderTint(token: string | null) {
+  if (headerTint === token) return;
+  headerTint = token;
+  if (fullscreen) applyTheme();
+}
+
+function applyFullscreen() {
+  const next = !!tg.isFullscreen;
+  if (next) document.documentElement.dataset.fullscreen = '';
+  else delete document.documentElement.dataset.fullscreen;
+  if (next === fullscreen) return;
+  fullscreen = next;
+  applyInsets();
+  applyTheme();
+}
+
+/** Fullscreen просим только на телефонах: на десктопе и в веб-клиенте остаётся окно с шапкой Telegram. */
+function requestFullscreen() {
+  if (!inTelegram || (tg.platform !== 'ios' && tg.platform !== 'android')) return;
+  try {
+    if (tg.isVersionAtLeast('8.0') && !tg.isFullscreen) tg.requestFullscreen?.();
+  } catch { /* не поддерживается — остаёмся в обычном режиме */ }
+}
+
 function applyInsets() {
   const s = document.documentElement.style;
   const a = tg.safeAreaInset ?? { top: 0, bottom: 0, left: 0, right: 0 };
   const c = tg.contentSafeAreaInset ?? { top: 0, bottom: 0, left: 0, right: 0 };
   // В fullscreen-режиме (Bot API 8.0+) контент нужно отодвинуть от системных и телеграмных контролов.
   s.setProperty('--safe-top', `${a.top + c.top}px`);
+  s.setProperty('--content-top', `${c.top}px`); // зона плавающих кнопок Telegram: в ней стоит заголовок экрана
   s.setProperty('--safe-bottom', `${a.bottom + c.bottom}px`);
   s.setProperty('--safe-left', `${a.left + c.left}px`);
   s.setProperty('--safe-right', `${a.right + c.right}px`);
@@ -142,16 +180,20 @@ function applyInsets() {
 
 /** Инициализация Mini App: ready/expand, тема, insets, подписки на изменения. */
 export function initTelegram() {
+  fullscreen = !!tg.isFullscreen;
+  if (fullscreen) document.documentElement.dataset.fullscreen = '';
   applyTheme();
   applyInsets();
   tg.ready();
   tg.expand();
+  requestFullscreen();
   try { if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes?.(); } catch { /* noop */ }
   syncFromCloud();
   tg.onEvent('themeChanged', applyTheme);
   tg.onEvent('viewportChanged', applyInsets);
   tg.onEvent('safeAreaChanged', applyInsets);
   tg.onEvent('contentSafeAreaChanged', applyInsets);
+  tg.onEvent('fullscreenChanged', applyFullscreen);
   if (!inTelegram) {
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
     addEventListener('resize', applyInsets);

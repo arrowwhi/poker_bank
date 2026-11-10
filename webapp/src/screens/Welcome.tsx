@@ -8,12 +8,15 @@ import { useNav } from '../router';
 import { useSession } from '../session';
 import { useMainButton } from '../telegram/buttons';
 import { startChatId } from '../telegram/telegram';
+import { setHeaderTint } from '../telegram/theme';
 
 export function Welcome() {
   const { me, reloadMe } = useSession();
   const nav = useNav();
   const active = me.active_game;
   useEffect(() => { void reloadMe(); }, [reloadMe]);
+  // В fullscreen стол лежит под статус-баром — красим его зону в цвет сукна.
+  useEffect(() => { setHeaderTint('--brand-felt'); return () => setHeaderTint(null); }, []);
 
   useMainButton(
     active
@@ -26,8 +29,10 @@ export function Welcome() {
   const first = me.user.display_name.split(' ')[0];
 
   return (
-    <Screen title="Банкир" subtitle="мини-приложение">
+    <Screen title="Банкир" subtitle="мини-приложение" bleed>
       <div className="hero">
+        <div className="hero-chips" aria-hidden="true"><i /><i /><i /></div>
+        <div className="hero-cards" aria-hidden="true"><i>A<b>♠︎</b></i><i className="red">K<b>♥︎</b></i></div>
         <div className="suits">♠️♥️♣️♦️</div>
         <h1>Банкир</h1>
         <p>Банк домашней игры в покер:<br />buy-in, rebuy и расчёт переводов</p>

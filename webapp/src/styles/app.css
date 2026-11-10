@@ -268,12 +268,82 @@ button.list-row:active { background: var(--bg-elevated); }
 .banner-accent { background: var(--accent-soft); }
 .banner-accent b { color: var(--accent-primary); }
 
+/* Приветствие: покерный стол — борт (рамка), сукно, линия ставок, фишки и карты. Всё на CSS. */
 .hero {
-  background: var(--brand-felt); color: #fff; border-radius: 20px; padding: 22px 18px; text-align: center;
+  position: relative; color: #fff; text-align: center; padding: 20px 24px; border-radius: 999px;
+  border: 10px solid transparent;
+  background:
+    radial-gradient(closest-side, var(--brand-felt-light), var(--brand-felt) 60%, var(--brand-felt-shade)) padding-box,
+    linear-gradient(var(--brand-rail-light), var(--brand-rail)) border-box;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .28), inset 0 2px 12px rgba(0, 0, 0, .45);
 }
+.hero::after {
+  content: ''; position: absolute; inset: 14px; border-radius: inherit; pointer-events: none;
+  border: 1.5px solid rgba(255, 255, 255, .18);
+}
+.hero > * { position: relative; z-index: 1; }
 .hero .suits { font-size: 28px; letter-spacing: 6px; }
 .hero h1 { margin: 6px 0 6px; font-size: 34px; }
 .hero p { margin: 0; opacity: .85; }
+.hero .hero-chips, .hero .hero-cards { position: absolute; top: 50%; width: 46px; height: 58px; margin-top: -36px; }
+.hero-chips { left: 16px; }
+.hero-cards { right: 18px; }
+.hero-chips i {
+  position: absolute; width: 24px; height: 24px; border-radius: 50%;
+  border: 2.5px dashed rgba(255, 255, 255, .95); box-shadow: 0 2px 3px rgba(0, 0, 0, .35);
+  background: radial-gradient(circle, rgba(255, 255, 255, .28) 0 32%, transparent 34%) var(--chip);
+}
+.hero-chips i:nth-child(1) { --chip: var(--status-danger); left: 4px; top: 30px; }
+.hero-chips i:nth-child(2) { --chip: var(--accent-primary); left: 18px; top: 14px; }
+.hero-chips i:nth-child(3) { --chip: var(--brand-dealer); left: 0; top: 2px; }
+.hero-cards i {
+  position: absolute; width: 32px; height: 44px; border-radius: 5px; background: #fff; color: #111318;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .35); font-style: normal; font-weight: 700; font-size: 15px; line-height: 1;
+  text-align: left; padding: 4px 0 0 5px;
+}
+.hero-cards i.red { color: #d92a33; }
+.hero-cards i b { position: absolute; right: 4px; bottom: 3px; font-size: 17px; }
+.hero-cards i:nth-child(1) { left: 0; top: 8px; transform: rotate(-12deg); }
+.hero-cards i:nth-child(2) { left: 14px; top: 2px; transform: rotate(10deg); }
+
+/* Fullscreen: стол на всю ширину уходит под статус-бар и кнопки Telegram, виден его нижний край с бортом. */
+:root[data-fullscreen] .hero {
+  margin: calc(-12px - var(--safe-top)) calc(-1 * var(--pad)) 0;
+  padding: calc(var(--safe-top) + 10px) 40px 62px;
+  border: 0; border-radius: 0; background: none; box-shadow: none; overflow: hidden;
+}
+:root[data-fullscreen] .hero::before {
+  content: ''; position: absolute; left: -30%; right: -30%; top: -80px; bottom: 18px; border-radius: 50%;
+  border: 12px solid transparent;
+  background:
+    radial-gradient(closest-side, var(--brand-felt-light), var(--brand-felt) 60%, var(--brand-felt-shade)) padding-box,
+    linear-gradient(var(--brand-rail-light), var(--brand-rail)) border-box;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .28), inset 0 2px 12px rgba(0, 0, 0, .45);
+}
+:root[data-fullscreen] .hero::after { inset: -54px calc(-30% + 26px) 44px; border-radius: 50%; }
+:root[data-fullscreen] .hero .hero-chips, :root[data-fullscreen] .hero .hero-cards { top: calc(var(--safe-top) + 78px); margin-top: -29px; }
+:root[data-fullscreen] .hero-chips { left: 26px; }
+:root[data-fullscreen] .hero-cards { right: 28px; }
+
+/* Fullscreen: полоса под статус-баром с заголовком экрана между плавающими кнопками Telegram. */
+.fs-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 30; height: var(--safe-top);
+  display: flex; align-items: flex-end; background: var(--bg-secondary);
+}
+.fs-bar.overlay { background: none; pointer-events: none; }
+.fs-bar-row {
+  position: relative; flex: 1; height: var(--content-top); min-height: 30px;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 var(--pad);
+}
+.fs-bar-title {
+  position: absolute; left: 110px; right: 110px; text-align: center; font-weight: 600; font-size: 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fs-pill {
+  pointer-events: auto; height: 30px; padding: 0 12px; border-radius: 15px; font-weight: 600; font-size: 14px;
+  color: #fff; background: rgba(0, 0, 0, .32);
+}
+.fs-pill.right { margin-left: auto; letter-spacing: 1px; }
 .felt-card { background: var(--brand-felt); color: #fff; border-radius: var(--radius-lg); padding: 14px 16px; }
 .felt-card h2 { margin: 0 0 4px; font-size: 19px; }
 .felt-card p { margin: 0; opacity: .85; font-size: 14px; }
@@ -338,3 +408,6 @@ button.list-row:active { background: var(--bg-elevated); }
 .devbar button { background: var(--bg-surface); border-radius: 8px; padding: 4px 8px; font-size: 12px; box-shadow: 0 1px 4px #0002; }
 .me-row { background: var(--accent-soft); }
 .option-row.on { background: var(--accent-soft); }
+
+/* В fullscreen шапки Telegram нет: тосты и уведомления встают сразу под зону его кнопок. */
+:root[data-fullscreen] .toasts, :root[data-fullscreen] .notify { top: calc(var(--safe-top) + 8px); }

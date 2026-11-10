@@ -3,11 +3,12 @@ import type { User } from '../api';
 import { initials } from '../lib/format';
 import { FallbackHeader, useBackButton } from '../telegram/buttons';
 
-export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+/** `bleed` — первый блок экрана сам уходит под статус-бар в fullscreen (стол на приветствии). */
+export function Screen({ title, subtitle, bleed, children }: { title: string; subtitle?: string; bleed?: boolean; children: ReactNode }) {
   useEffect(() => { document.title = title; }, [title]);
   return (
     <>
-      <FallbackHeader title={title} subtitle={subtitle} />
+      <FallbackHeader title={title} subtitle={subtitle} overlay={bleed} />
       <div className="screen stack">{children}</div>
     </>
   );
