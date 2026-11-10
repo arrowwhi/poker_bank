@@ -106,6 +106,8 @@ button.list-row:active { background: var(--bg-elevated); }
   width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-primary);
   display: grid; place-items: center; font-size: 18px; flex-shrink: 0;
 }
+.icon-box-danger { background: var(--status-danger-soft); color: var(--status-danger); }
+.icon-box-neutral { background: var(--bg-elevated); color: var(--text-secondary); }
 .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── аватар, бейджи ── */

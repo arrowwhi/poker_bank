@@ -291,10 +291,6 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
       if (await confirm(forceDialog(game.bank_rub))) void finish(true);
       return;
     }
-    if (game.participants.length === 0) {
-      if (await confirm({ icon: '🏁', title: 'Завершить пустую игру?', text: 'Никто не сделал buy-in — игра будет отменена.', ok: 'Завершить' })) void finish(false);
-      return;
-    }
     if (await confirm({ icon: '🏁', title: 'Завершить игру?', text: 'Бот посчитает переводы и опубликует план в группе. Отменить будет нельзя.', ok: 'Завершить', tone: 'success' })) void finish(false);
   };
   const cancelGame = async () => {
@@ -307,10 +303,11 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
     await act(() => api.undo(game.id, 1), 'Последнее действие отменено');
   };
 
+  // Завершение игры живёт только в MainButton: в контенте его нет, чтобы на экране было одно главное действие.
   const noSheet = !picker && !actionFor && !cashoutFor;
   useMainButton(!noSheet ? null :
     ready ? { text: '🏁 Завершить игру', tone: 'success', onClick: end } :
-    mismatch ? { text: 'Завершить с расхождением', tone: 'danger', onClick: end } :
+    mismatch ? { text: `Завершить с расхождением ${signedRub(game.bank_rub)}`, tone: 'danger', onClick: end } :
     { text: '＋ Buy-in игрока', onClick: () => setPicker('buyin') });
 
   return (
@@ -326,13 +323,13 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
         </>
       )}
 
-      {ready && <div className="banner banner-success"><b>✅ Все вышли, банк сошёлся</b>Можно завершать игру — бот посчитает переводы.</div>}
+      {ready && <div className="banner banner-success"><b>✅ Все вышли, банк сошёлся</b>Бот посчитает переводы и опубликует план в группе.</div>}
       {mismatch && (
         <div className="banner banner-warning">
           <b>⚠️ Расхождение банка: {signedRub(game.bank_rub)}</b>
           {game.bank_rub > 0
-            ? 'Выдано фишек больше, чем вернули. Проверьте cash-out’ы или undo. При завершении долг проигравших пропорционально уменьшится.'
-            : 'Вернули фишек больше, чем выдано. Проверьте cash-out’ы или undo. При завершении выигрыш победителей пропорционально уменьшится.'}
+            ? `Выдано фишек больше, чем вернули. Проверьте cash-out’ы. Если завершить так — долг проигравших пропорционально уменьшится на ${rub(Math.abs(game.bank_rub))}.`
+            : `Вернули фишек больше, чем выдано. Проверьте cash-out’ы. Если завершить так — выигрыш победителей пропорционально уменьшится на ${rub(Math.abs(game.bank_rub))}.`}
           <div><button className="btn btn-plain" style={{ padding: '6px 0', width: 'auto' }} onClick={undo}>↩️ Отменить последнее действие</button></div>
         </div>
       )}
@@ -349,17 +346,17 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
         <ListRow left={<div className="icon-box">💸</div>} title="Cash-out игрока" sub="Вывести фишки и закрыть игрока" chevron onClick={() => active.length && setPicker('cashout')} />
         <ListRow left={<div className="icon-box">↩️</div>} title="Отменить последнее"
           sub={last ? `Undo: ${ledgerLabel(last.type)} ${handle(last.player)}, ${time(last.created_at)}` : 'Нет действий'} chevron onClick={undo} />
+        <ListRow left={<div className="icon-box icon-box-danger">✕</div>} title={<span className="neg">Отменить игру</span>} sub="Без итогов и переводов" chevron onClick={cancelGame} />
       </div>
 
       <Participants game={game} meId={meId} hint="нажмите для действий" onClick={(p) => { haptic.tap(); setActionFor(p); }} />
 
-      <div className="card stack" style={{ gap: 8 }}>
-        <button className={`btn btn-lg ${ready ? 'btn-success' : mismatch ? 'btn-soft-danger' : 'btn-neutral'}`} disabled={!allOut && game.participants.length > 0} onClick={end}>🏁 Завершить игру</button>
-        {!allOut && active.length > 0 && (
-          <div className="muted" style={{ fontSize: 13 }}>Сначала сделайте cash-out: {active.map((p) => who(p.user, meId)).join(', ')}</div>
-        )}
-      </div>
-      <button className="btn btn-plain danger" onClick={cancelGame}>Отменить игру</button>
+      {active.length > 0 && (
+        <div className="card flush">
+          <ListRow left={<div className="icon-box icon-box-neutral">🏁</div>} title="Завершение игры"
+            sub={`Осталось сделать cash-out: ${active.map((p) => who(p.user, meId)).join(', ')}`} chevron onClick={() => setPicker('cashout')} />
+        </div>
+      )}
 
       {picker && (
         <PlayerPickerSheet game={game} mode={picker} meId={meId} act={act} onClose={() => setPicker(null)}
