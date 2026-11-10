@@ -138,13 +138,16 @@ const gamesLabel = (n: number) => `${n} ${plural(n, 'игра', 'игры', 'и�
 
 /**
  * Выбор чата выпадающим списком: «Все чаты» (value = null) — первым пунктом, дальше чаты
- * в порядке API — от самых популярных вниз.
+ * в порядке API — от самых популярных вниз. С `all={false}` пункта «Все чаты» нет:
+ * так выбирают чат там, где данные есть только по одному чату (рейтинг).
  */
-export function ChatSelect({ chats, value, onChange }: { chats: Chat[]; value: number | null; onChange: (chatId: number | null) => void }) {
+export function ChatSelect({ chats, value, onChange, all = true }: {
+  chats: Chat[]; value: number | null; onChange: (chatId: number | null) => void; all?: boolean;
+}) {
   const total = chats.reduce((n, c) => n + c.games_count, 0);
   const options: SelectOption<number | 'all'>[] = [
-    {
-      value: 'all', title: 'Все чаты',
+    ...(!all ? [] : [{
+      value: 'all' as const, title: 'Все чаты',
       sub: `${chats.length} ${plural(chats.length, 'чат', 'чата', 'чатов')} · ${gamesLabel(total)}`,
       left: (
         <span className="select-icon">
@@ -154,7 +157,7 @@ export function ChatSelect({ chats, value, onChange }: { chats: Chat[]; value: n
           </svg>
         </span>
       ),
-    },
+    }]),
     ...chats.map((c) => ({
       value: c.id as number | 'all', title: c.title,
       sub: c.games_count ? `${gamesLabel(c.games_count)}${c.last_game_at ? ` · последняя ${dateShort(c.last_game_at)}` : ''}` : 'ещё не играли',

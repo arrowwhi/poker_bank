@@ -1,18 +1,29 @@
 import { useState } from 'react';
 import { api, type LeaderboardPeriod } from '../api';
-import { who } from '../components/domain';
+import { ChatSelect, who } from '../components/domain';
 import { Avatar, Chips, ErrorState, ListRow, Screen, Skeleton } from '../components/ui';
 import { handle, netClass, plural, signedRub } from '../lib/format';
 import { useAsync } from '../lib/hooks';
+import { rememberChat } from '../lib/lastChat';
 import { useNav } from '../router';
 import { useSession } from '../session';
 import { haptic } from '../telegram/telegram';
 
-export function LeaderboardScreen({ chatId }: { chatId: number }) {
+export function LeaderboardScreen({ chatId: initialChat }: { chatId: number }) {
   const { me } = useSession();
   const nav = useNav();
+  const [chatId, setChatId] = useState(initialChat);
   const [period, setPeriod] = useState<LeaderboardPeriod>('all');
+  const chats = useAsync(() => api.listChats(), []);
   const lb = useAsync(() => api.getLeaderboard(chatId, period), [chatId, period]);
+  // Чата, открытого по ссылке, в списке пользователя может и не быть — тогда выбора нет.
+  const pickable = !!chats.data?.some((c) => c.id === chatId);
+  const pickChat = (id: number | null) => {
+    if (id === null) return;
+    haptic.select();
+    rememberChat(id);
+    setChatId(id);
+  };
   const open = (id: number) => nav.push({ name: 'profile', userId: id === me.user.id ? undefined : id, chatId });
 
   const e = lb.data?.entries ?? [];
@@ -21,6 +32,8 @@ export function LeaderboardScreen({ chatId }: { chatId: number }) {
 
   return (
     <Screen title="Рейтинг" subtitle={lb.data ? `${lb.data.chat_title} · ${e.length} ${plural(e.length, 'игрок', 'игрока', 'игроков')}` : undefined}>
+      {chats.loading ? <div className="card"><Skeleton h={55} /></div>
+        : pickable && <div className="card"><ChatSelect all={false} chats={chats.data!} value={chatId} onChange={pickChat} /></div>}
       <Chips<LeaderboardPeriod> value={period} onChange={(v) => { haptic.select(); setPeriod(v); }}
         options={[{ value: 'all', label: 'За всё время' }, { value: 'year', label: 'За год' }, { value: 'month', label: 'За месяц' }]} />
       {lb.error ? <ErrorState error={lb.error} onRetry={lb.reload} /> : !lb.data ? <Skeleton h={300} /> : !e.length ? (

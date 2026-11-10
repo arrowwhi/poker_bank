@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { api } from '../api';
 import { useAsync } from '../lib/hooks';
+import { defaultChat } from '../lib/lastChat';
 import { Avatar, Badge, ListRow, Screen } from '../components/ui';
 import { ThemeButton } from '../components/ThemeButton';
 import { handle, plural, rub, signedRub, time } from '../lib/format';
@@ -22,7 +23,9 @@ export function Welcome() {
   );
 
   const chats = useAsync(() => api.listChats(), []);
-  const mainChat = active?.chat_id ?? startChatId() ?? chats.data?.[0]?.id ?? null;
+  // Чат рейтинга: активная игра → чат из ссылки → последний выбранный → самый популярный.
+  const mainChat = active?.chat_id ?? startChatId() ?? defaultChat(chats.data)?.id ?? null;
+  const mainChatTitle = chats.data?.find((c) => c.id === mainChat)?.title;
   const first = me.user.display_name.split(' ')[0];
 
   return (
@@ -68,7 +71,7 @@ export function Welcome() {
         <ListRow left={<div className="icon-box">＋</div>} title="Новая игра" sub="Начать игру за столом в группе" chevron onClick={() => nav.push({ name: 'newgame' })} />
         <ListRow left={<div className="icon-box">📊</div>} title="Мой профиль" sub="Статистика за все игры" chevron onClick={() => nav.push({ name: 'profile' })} />
         {mainChat !== null && (
-          <ListRow left={<div className="icon-box">🏆</div>} title="Рейтинг чата" sub="Кто в плюсе за всё время" chevron
+          <ListRow left={<div className="icon-box">🏆</div>} title="Рейтинг чата" sub={mainChatTitle ?? 'Кто в плюсе за всё время'} chevron
             onClick={() => nav.push({ name: 'leaderboard', chatId: mainChat })} />
         )}
       </div>

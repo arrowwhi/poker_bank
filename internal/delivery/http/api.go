@@ -238,6 +238,12 @@ func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	ctx, uid := r.Context(), me(r)
 	b := a.newBuilder(uid)
 
+	// /api/me — первый запрос приложения при открытии. start_param пишем всегда, в том числе
+	// пустой: по логу видно, дошёл ли до приложения параметр startapp из ссылки.
+	if id, ok := IdentityFrom(ctx); ok {
+		a.log.Info("mini app session", zap.Int64("user_id", uid), zap.String("start_param", id.StartParam))
+	}
+
 	out := meDTO{User: b.user(ctx, uid), MemberSince: time.Now()}
 	if p, err := a.players.GetByID(ctx, uid); err == nil {
 		out.MemberSince = p.CreatedAt

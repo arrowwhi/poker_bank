@@ -4,6 +4,7 @@ import { ChatSelect, NetChart } from '../components/domain';
 import { Avatar, Chips, ErrorState, ListRow, Loading, Screen, SectionHeader, Skeleton, StatTile, useToast } from '../components/ui';
 import { date, dateShort, handle, monthYear, netClass, rub, signedRub } from '../lib/format';
 import { useAsync } from '../lib/hooks';
+import { rememberChat } from '../lib/lastChat';
 import { bestWorst, cumulativeSeries, plusStreaks, type ChartPeriod } from '../lib/stats';
 import { useNav } from '../router';
 import { useSession } from '../session';
@@ -54,7 +55,7 @@ export function Profile({ userId, chatId: initialChat }: { userId?: number; chat
           </div>
         </div>
         {chats.loading ? <Skeleton h={55} /> : (
-          <ChatSelect chats={chats.data ?? []} value={chatId} onChange={(id) => { haptic.select(); setChatId(id); }} />
+          <ChatSelect chats={chats.data ?? []} value={chatId} onChange={(id) => { haptic.select(); if (id !== null) rememberChat(id); setChatId(id); }} />
         )}
       </div>
 
