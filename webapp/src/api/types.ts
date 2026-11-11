@@ -211,10 +211,15 @@ export interface PlayerStats {
 }
 
 export interface LeaderboardEntry {
+  /** Место по рублям. В фишках и «% от входа» клиент пересчитывает места сам (lib/leaderboard.ts). */
   place: number;
   user: User;
   games_played: number;
   total_net_rub: number;
+  /** Σ (фишки на выходе − фишки на входе) по играм периода. */
+  total_net_chips: number;
+  /** Σ внесённого (buy-in + rebuy) — знаменатель для «% от входа». */
+  total_in_rub: number;
   win_rate: number;
 }
 

@@ -196,7 +196,11 @@ type leaderboardEntryDTO struct {
 	User        userDTO `json:"user"`
 	GamesPlayed int     `json:"games_played"`
 	TotalNetRub int     `json:"total_net_rub"`
-	WinRate     float64 `json:"win_rate"`
+	// Σ (фишки на выходе − фишки на входе).
+	TotalNetChips int `json:"total_net_chips"`
+	// Σ внесённого (buy-in + rebuy) — знаменатель для «% от входа».
+	TotalInRub int     `json:"total_in_rub"`
+	WinRate    float64 `json:"win_rate"`
 }
 
 type leaderboardDTO struct {

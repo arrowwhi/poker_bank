@@ -127,3 +127,15 @@ func SeedFinishedGame(t *testing.T, pool *infrapg.Pool, chatID, playerID int64, 
 	}
 	return gameID
 }
+
+// SeedLedger добавляет в игру запись ledger от имени самого игрока. Возвращает id записи.
+func SeedLedger(t *testing.T, pool *infrapg.Pool, gameID, playerID int64, typ domain.LedgerType, rub, chips int) int64 {
+	t.Helper()
+	id, err := postgres.NewLedgerRepo(pool).Create(context.Background(), &domain.LedgerEntry{
+		GameID: gameID, PlayerTgID: playerID, Type: typ, AmountRub: rub, AmountChips: chips, CreatedByTgID: playerID,
+	})
+	if err != nil {
+		t.Fatalf("create ledger entry: %v", err)
+	}
+	return id
+}

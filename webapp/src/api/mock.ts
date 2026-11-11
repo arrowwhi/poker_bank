@@ -582,17 +582,23 @@ export class MockApi implements BankirApi {
 
   private board(chatId: number, period: LeaderboardPeriod): LeaderboardEntry[] {
     const from = period === 'all' ? 0 : Date.now() - (period === 'year' ? 365 : 30) * DAY;
-    const agg = new Map<number, { n: number; net: number; wins: number }>();
+    const agg = new Map<number, { n: number; net: number; wins: number; tin: number; chips: number }>();
     for (const g of this.games) {
       if (g.status !== 'finished' || g.chat_id !== chatId || (g.ended_at ?? 0) < from) continue;
       for (const r of g.results ?? []) {
-        const a = agg.get(r.user.id) ?? { n: 0, net: 0, wins: 0 };
+        const a = agg.get(r.user.id) ?? { n: 0, net: 0, wins: 0, tin: 0, chips: 0 };
         a.n++; a.net += r.net_rub; if (r.net_rub > 0) a.wins++;
+        a.tin += r.total_in_rub;
+        // Курс в игре один, поэтому фишки на входе — это внесённые рубли по курсу.
+        a.chips += r.total_out_chips - Math.round((r.total_in_rub * g.rate.buy_in_chips) / g.rate.buy_in_rub);
         agg.set(r.user.id, a);
       }
     }
-    return [...agg].sort((a, b) => b[1].net - a[1].net)
-      .map(([id, a], i) => ({ place: i + 1, user: u(id), games_played: a.n, total_net_rub: a.net, win_rate: a.n ? a.wins / a.n : 0 }));
+    return [...agg].sort((a, b) => b[1].net - a[1].net || b[1].n - a[1].n)
+      .map(([id, a], i) => ({
+        place: i + 1, user: u(id), games_played: a.n, total_net_rub: a.net, total_net_chips: a.chips, total_in_rub: a.tin,
+        win_rate: a.n ? a.wins / a.n : 0,
+      }));
   }
 
   private stats(userId: number, chatId: number | null): PlayerStats {

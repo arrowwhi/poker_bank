@@ -19,6 +19,20 @@ export function signedRub(n: number): string {
   return (n > 0 ? '+' : MINUS) + num(n) + '₽';
 }
 
+/** Фишки со знаком, без единицы (значок фишки рисует экран): +1 980 / −160 / 0 */
+export function signedChips(n: number): string {
+  if (n === 0) return '0';
+  return (n > 0 ? '+' : MINUS) + num(n);
+}
+
+/** Проценты со знаком: целые без дробной части, иначе один знак через запятую — +127% / −33,3% / 0% */
+export function signedPct(p: number): string {
+  const tenths = Math.round(Math.abs(p) * 10);
+  if (tenths === 0) return '0%';
+  const frac = tenths % 10;
+  return (p > 0 ? '+' : MINUS) + num(Math.floor(tenths / 10)) + (frac ? ',' + frac : '') + '%';
+}
+
 export function plural(n: number, one: string, few: string, many: string): string {
   const a = Math.abs(n) % 100;
   const b = a % 10;

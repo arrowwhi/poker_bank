@@ -154,14 +154,26 @@ func (r *GameResultRepo) ListHistory(ctx context.Context, playerTgID, chatID int
 }
 
 // LeaderboardSince — рейтинг группы по играм, завершённым не раньше since (nil — за всё время).
+// Порядок строк — по рублям (по нему считается место в профиле); в фишках и в процентах
+// рейтинг пересортировывает клиент.
+//
+// Фишки на выходе берутся из game_results, на входе — из неотменённых BUY_IN/REBUY в ledger.
 func (r *GameResultRepo) LeaderboardSince(ctx context.Context, chatID int64, since *time.Time) ([]domain.PlayerChatStats, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT gr.player_tg_id,
 		       COUNT(*)                                AS game_count,
 		       SUM(gr.net_rub)                         AS total_net_rub,
-		       COUNT(*) FILTER (WHERE gr.net_rub > 0)  AS wins_count
+		       COUNT(*) FILTER (WHERE gr.net_rub > 0)  AS wins_count,
+		       SUM(gr.total_in_rub)                    AS total_in_rub,
+		       SUM(gr.total_out_chips - ci.chips_in)   AS total_net_chips
 		FROM game_results gr
 		JOIN games g ON g.id = gr.game_id
+		CROSS JOIN LATERAL (
+			SELECT COALESCE(SUM(l.amount_chips), 0) AS chips_in
+			FROM ledger l
+			WHERE l.game_id = gr.game_id AND l.player_tg_id = gr.player_tg_id
+			  AND l.type IN ('BUY_IN', 'REBUY') AND l.is_void = false
+		) ci
 		WHERE g.chat_id = $1 AND g.status = 'finished'
 		  AND ($2::timestamptz IS NULL OR g.ended_at >= $2)
 		GROUP BY gr.player_tg_id
@@ -175,7 +187,7 @@ func (r *GameResultRepo) LeaderboardSince(ctx context.Context, chatID int64, sin
 	var stats []domain.PlayerChatStats
 	for rows.Next() {
 		var s domain.PlayerChatStats
-		if err := rows.Scan(&s.PlayerTgID, &s.GameCount, &s.TotalNetRub, &s.WinsCount); err != nil {
+		if err := rows.Scan(&s.PlayerTgID, &s.GameCount, &s.TotalNetRub, &s.WinsCount, &s.TotalInRub, &s.TotalNetChips); err != nil {
 			return nil, fmt.Errorf("scan leaderboard row: %w", err)
 		}
 		stats = append(stats, s)

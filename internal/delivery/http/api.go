@@ -379,7 +379,8 @@ func (a *api) leaderboard(w http.ResponseWriter, r *http.Request) {
 	for i, s := range rows {
 		out.Entries = append(out.Entries, leaderboardEntryDTO{
 			Place: i + 1, User: b.user(ctx, s.PlayerTgID), GamesPlayed: s.GameCount,
-			TotalNetRub: s.TotalNetRub, WinRate: ratio(s.WinsCount, s.GameCount),
+			TotalNetRub: s.TotalNetRub, TotalNetChips: s.TotalNetChips, TotalInRub: s.TotalInRub,
+			WinRate: ratio(s.WinsCount, s.GameCount),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

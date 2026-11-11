@@ -18,4 +18,9 @@ type PlayerChatStats struct {
 	GameCount   int
 	TotalNetRub int
 	WinsCount   int
+	// Поля ниже заполняет только LeaderboardSince (рейтинг в Mini App).
+	// TotalInRub — Σ внесённого (buy-in + rebuy), знаменатель для «% от входа».
+	TotalInRub int
+	// TotalNetChips — Σ (фишки на выходе − фишки на входе).
+	TotalNetChips int
 }

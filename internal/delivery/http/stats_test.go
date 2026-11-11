@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 	"github.com/go-chi/chi/v5"
 
 	"poker_bank/internal/domain"
@@ -43,7 +44,14 @@ func (stubNotifier) PlayerName(context.Context, int64) string { return "" }
 func apiOnPostgres(t *testing.T) (http.Handler, func(chatID, playerID int64, netRub int) int64) {
 	t.Helper()
 	pool := pgtest.Pool(t)
+	seed := func(chatID, playerID int64, netRub int) int64 {
+		return pgtest.SeedFinishedGame(t, pool, chatID, playerID, netRub)
+	}
+	return apiOnPool(pool), seed
+}
 
+// apiOnPool — то же поверх готового пула: тест сам наполняет базу.
+func apiOnPool(pool *infrapg.Pool) http.Handler {
 	games := service.NewGameService(
 		postgres.NewGameRepo(pool), postgres.NewLedgerRepo(pool), postgres.NewParticipantRepo(pool),
 		postgres.NewGameResultRepo(pool), postgres.NewSettlementRepo(pool), postgres.NewPendingActionRepo(pool),
@@ -56,10 +64,7 @@ func apiOnPostgres(t *testing.T) (http.Handler, func(chatID, playerID int64, net
 		r.Use(TelegramAuth(token, nil))
 		a.routes(r)
 	})
-	seed := func(chatID, playerID int64, netRub int) int64 {
-		return pgtest.SeedFinishedGame(t, pool, chatID, playerID, netRub)
-	}
-	return r, seed
+	return r
 }
 
 func getAs(t *testing.T, h http.Handler, userID int64, path string) *httptest.ResponseRecorder {
