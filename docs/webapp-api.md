@@ -7,7 +7,7 @@
 
 ## 0. TL;DR
 
-- Сервис собран на скелете `github.com/arrowwhi/infrastructure`: `telegram.App` запускает бота (`telegram.Bot`), HTTP-сервер (net/http + chi, `internal/delivery/http`) и фоновые задачи в одном процессе (`internal/app`). Пакет `internal/delivery/http`; фронт встроен в бинарь (`webapp/embed.go`) и отдаётся с того же origin → CORS не нужен.
+- Сервис собран на скелете `github.com/arrowwhi/infrastructure`: `telegram.App` запускает бота (`telegram.Bot`), HTTP-сервер (`http/server`, chi) и фоновые задачи в одном процессе (`internal/app`). Пакет `internal/delivery/http`; фронт встроен в бинарь (`webapp/embed.go`) и отдаётся с того же origin → CORS не нужен.
 - Авторизация: заголовок `Authorization: tma <initDataRaw>`, проверка HMAC по токену бота + `auth_date` не старше 24 ч. Доступ к чату — `getChatMember` с кешем на 5 мин.
 - Вход: `t.me/<bot>/<app>?startapp=c<chat_id>` (ссылка на чат) или `startapp=g<game_id>` (ссылка на итоги игры). Ссылку бот ставит URL-кнопкой «Открыть банк» под своими сообщениями в группе.
 - Синхронизация с чатом: новый интерфейс `Notifier` в сервисном слое (реализован в `delivery/telegram`). Сервис после коммита вызывает `PendingCreated/PendingResolved/GameCreated/GameFinished/SettlementsChanged`, а notifier публикует или редактирует сообщение в чате. **Бот и HTTP идут одним путём**: callback-хендлер бота тоже вызывает `service.ResolvePending`, а сообщение правит notifier.
@@ -633,13 +633,13 @@ internal/
   delivery/
     telegram/                // обработчики на *telegram.Context (адаптер context.go), middleware: tgforum, UpsertPlayer, TopicGuard
     http/
-      server.go              // net/http + chi-роутер: webhook, /api/*, SPA; accesslog.go — access-лог без тел
+      server.go              // httpserver.New(...) + chi-роутер: webhook, /api/*, SPA
       auth.go                // TelegramAuth: Authorization: tma <initData>, HMAC, auth_date ≤ 24 ч
   repository/postgres/       // пул connections/postgres; транзакции — pool.InTx (транзакция в контексте)
 webapp/embed.go              // go:embed all:dist (в git только dist/.gitkeep)
 ```
 
-- **HTTP-сервер** — свой `net/http` + chi (не `http/server` инфраструктуры: его `middlewares.Log` пишет в лог тела запросов и ответов и не отключается): request-id и real IP из `http/server/middlewares`, recovery, access-лог через `observability/logger` (метод, путь, статус, латентность, `request_id`, `remote_addr` — без тел), `/healthz` и `/ready` на общем реестре `a.Health()`; подключены `tracing.Middleware` и `metrics.Middleware`. Роуты: `POST $TELEGRAM_WEBHOOK_PATH` (только webhook), `/api/*` под `TelegramAuth`, остальное — SPA (`index.html` с `no-cache`, `assets/*` — `immutable`).
+- **HTTP-сервер** — `http/server` инфраструктуры (chi): recovery, request-id, real IP, access-лог через `observability/logger` с `DisableBodyLogging: true` (метод, путь, статус, латентность, `request_id`, `remote_addr` — без тел запросов и ответов), `/healthz` и `/ready` на общем реестре `a.Health()`; подключены `tracing.Middleware` и `metrics.Middleware`. Роуты: `POST $TELEGRAM_WEBHOOK_PATH` (только webhook), `/api/*` под `TelegramAuth`, остальное — SPA (`index.html` с `no-cache`, `assets/*` — `immutable`).
 - **Служебный порт** `ADMIN_PORT` (9090) поднимает `telegram.App`: `/metrics`, `/healthz`, `/ready`. Наружу не публикуется.
 - **Логи**: код poker_bank пишет в zap, как раньше; логгер инфраструктуры (zerolog) — только её собственные события.
 - **Реализовано в API пока** только `GET /api/me`: пользователь, `start_param`, активные игры, где он дилер или участник. Остальные эндпоинты из §4 — следующий этап.

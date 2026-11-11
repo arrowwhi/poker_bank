@@ -35,7 +35,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(<-done)
 }
 
-// Access-лог не должен содержать тел запросов и ответов: в /api там имена игроков и суммы,
+// Access-лог (middlewares.Log сервера infrastructure с DisableBodyLogging) не должен содержать тел запросов и ответов: в /api там имена игроков и суммы,
 // в webhook — апдейты Telegram, у статики — весь index.html.
 func TestAccessLogOmitsBodies(t *testing.T) {
 	const (
