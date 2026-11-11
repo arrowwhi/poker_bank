@@ -1,21 +1,24 @@
-// Package http — публичный HTTP-сервер poker_bank на http/server инфраструктуры:
+// Package http — публичный HTTP-сервер poker_bank:
 // API Mini App (/api), собранный фронтенд и webhook Telegram.
 package http
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
 	"time"
 
-	httpserver "github.com/arrowwhi/infrastructure/http/server"
+	"github.com/arrowwhi/infrastructure/http/server/middlewares"
 	"github.com/arrowwhi/infrastructure/observability/health"
 	"github.com/arrowwhi/infrastructure/observability/logger"
 	"github.com/arrowwhi/infrastructure/observability/metrics"
 	"github.com/arrowwhi/infrastructure/observability/tracing"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/service"
@@ -40,28 +43,34 @@ type Deps struct {
 	ShutdownTimeout time.Duration
 }
 
-// New собирает сервер. Он реализует telegram.Component и запускается через App.Run.
-func New(d Deps) (*httpserver.Server, error) {
-	srv, err := httpserver.New(httpserver.Config{
-		Host:              "0.0.0.0",
-		Port:              d.Port,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		ReadHeaderTimeout: 10 * time.Second,
-		ShutdownTimeout:   d.ShutdownTimeout,
-	},
-		httpserver.WithHealthRegistry(d.Health),
-		httpserver.WithMiddlewares(
-			tracing.Middleware(d.ServiceName),
-			metrics.Middleware(d.ServiceName),
-		),
-	)
-	if err != nil {
-		return nil, err
-	}
+// Server — HTTP-сервер poker_bank; реализует telegram.Component и запускается через App.Run.
+//
+// Собирается на net/http + chi, а не на http/server инфраструктуры: тот всегда ставит
+// middlewares.Log, который пишет в лог тела запросов и ответов (персональные данные игроков),
+// и отключить это нельзя. Остальное повторяет его поведение: RequestID, RealIP, /healthz, /ready.
+type Server struct {
+	srv             *http.Server
+	shutdownTimeout time.Duration
+}
 
-	r := srv.Router()
+// New собирает сервер.
+func New(d Deps) (*Server, error) {
+	r := chi.NewRouter()
+	r.Use(
+		middlewares.RequestID,
+		middlewares.RealIP,
+		accessLog,
+		middleware.Recoverer, // внутри accessLog — паника попадёт в лог как 500
+		tracing.Middleware(d.ServiceName),
+		metrics.Middleware(d.ServiceName),
+	)
+
+	registry := d.Health
+	if registry == nil {
+		registry = health.New()
+	}
+	r.Method(http.MethodGet, "/healthz", health.LivenessHandler())
+	r.Method(http.MethodGet, "/ready", registry.ReadinessHandler())
 
 	if d.TelegramWebhook != nil {
 		r.Method(http.MethodPost, d.WebhookPath, d.TelegramWebhook)
@@ -78,7 +87,46 @@ func New(d Deps) (*httpserver.Server, error) {
 		r.Handle("/*", spaHandler(d.WebAssets))
 	}
 
-	return srv, nil
+	return &Server{
+		srv: &http.Server{
+			Addr:              "0.0.0.0:" + d.Port,
+			Handler:           r,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+		},
+		shutdownTimeout: d.ShutdownTimeout,
+	}, nil
+}
+
+// Handler — корневой обработчик со всеми middleware (для тестов).
+func (s *Server) Handler() http.Handler { return s.srv.Handler }
+
+// Run слушает порт до отмены ctx, затем останавливается с ожиданием ShutdownTimeout.
+func (s *Server) Run(ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info(ctx).Str("addr", s.srv.Addr).Msg("starting http server")
+		if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
+	defer cancel()
+	logger.Info(ctx).Msg("shutting down http server")
+	if err := s.srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown http server: %w", err)
+	}
+	return <-errCh
 }
 
 // upsertPlayer обновляет ник и имя пользователя при каждом заходе в Mini App.
