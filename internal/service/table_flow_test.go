@@ -69,6 +69,11 @@ func (r memGames) GetByID(_ context.Context, id int64) (*domain.Game, error) {
 	return nil, pgx.ErrNoRows
 }
 
+// LockByID в памяти — просто чтение: тесты однопоточные, блокировка нужна только Postgres.
+func (r memGames) LockByID(ctx context.Context, id int64) (*domain.Game, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r memGames) GetActiveByChat(_ context.Context, chatID int64) (*domain.Game, error) {
 	for _, g := range r.db.games {
 		if g.ChatID == chatID && g.Status == domain.GameStatusActive {
@@ -95,10 +100,21 @@ func (r memGames) ListActiveByPlayer(_ context.Context, tgID int64) ([]domain.Ga
 	return out, nil
 }
 
+// setStatus меняет статус только активной игры — как UPDATE … AND status = 'active'.
 func (r memGames) setStatus(id int64, st domain.GameStatus) error {
 	for i := range r.db.games {
-		if r.db.games[i].ID == id {
+		if r.db.games[i].ID == id && r.db.games[i].Status == domain.GameStatusActive {
 			r.db.games[i].Status = st
+			return nil
+		}
+	}
+	return pgx.ErrNoRows
+}
+
+func (r memGames) UpdateDealer(_ context.Context, id, dealerTgID int64) error {
+	for i := range r.db.games {
+		if r.db.games[i].ID == id && r.db.games[i].Status == domain.GameStatusActive {
+			r.db.games[i].DealerTgID = dealerTgID
 			return nil
 		}
 	}
@@ -463,7 +479,7 @@ func TestBuyInIsAtomic(t *testing.T) {
 	}
 
 	db.failParticipantCreate = errors.New("participants unavailable")
-	if err := s.BuyIn(ctx, g, testDealer, testDealer); err == nil {
+	if _, err := s.DealerBuyIn(ctx, g, testDealer, testDealer); err == nil {
 		t.Fatal("buy-in succeeded without participant")
 	}
 	if bank, _ := s.GetBank(ctx, g.ID); bank != 0 || len(db.ledger) != 0 {
@@ -581,4 +597,132 @@ func TestUndoRestoresSeatFromLedger(t *testing.T) {
 			mustRows(t, db, g.ID, 0)
 		})
 	}
+}
+
+// stale возвращает копию игры, какой её видел вызывающий до изменения в БД.
+func stale(g *domain.Game) *domain.Game { c := *g; return &c }
+
+// Операции проверяют состояние игры, перечитанное под блокировкой, а не то, что
+// передал вызывающий: кнопка под старым сообщением или параллельный запрос из
+// Mini App не должны писать в завершённую или отменённую игру (ревью C1–C3).
+func TestStaleGameIsRecheckedUnderLock(t *testing.T) {
+	ctx := context.Background()
+	const player int64 = 7
+
+	t.Run("buy-in into a game cancelled meanwhile", func(t *testing.T) {
+		s, db := newFlowService()
+		g := newTable(t, s)
+		old := stale(g)
+		if _, err := s.CancelGame(ctx, g, testDealer); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DealerBuyIn(ctx, old, testDealer, player); !errors.Is(err, ErrGameNotActive) {
+			t.Fatalf("err = %v, want ErrGameNotActive", err)
+		}
+		if old.Status != domain.GameStatusCancelled {
+			t.Fatalf("caller's game not refreshed: status = %s", old.Status)
+		}
+		if len(db.ledger) != 1 {
+			t.Fatalf("ledger rows = %d, want only the dealer's buy-in", len(db.ledger))
+		}
+	})
+
+	t.Run("cash-out and rebuy after the game finished", func(t *testing.T) {
+		s, db := newFlowService()
+		g := newTable(t, s)
+		old := stale(g)
+		if _, err := s.DealerCashOut(ctx, g, testDealer, testDealer, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.EndGame(ctx, g, testDealer, false); err != nil {
+			t.Fatal(err)
+		}
+		rows := len(db.ledger)
+		if _, err := s.DealerCashOut(ctx, stale(old), testDealer, testDealer, 1000); !errors.Is(err, ErrGameNotActive) {
+			t.Fatalf("cash-out err = %v, want ErrGameNotActive", err)
+		}
+		if _, err := s.DealerRebuy(ctx, stale(old), testDealer, testDealer); !errors.Is(err, ErrGameNotActive) {
+			t.Fatalf("rebuy err = %v, want ErrGameNotActive", err)
+		}
+		if len(db.ledger) != rows {
+			t.Fatalf("ledger grew after finish: %d → %d", rows, len(db.ledger))
+		}
+		mustStatus(t, s, g.ID, domain.GameStatusFinished)
+	})
+
+	t.Run("second cash-out of the same player", func(t *testing.T) {
+		s, db := newFlowService()
+		g := newTable(t, s)
+		old := stale(g)
+		if _, err := s.DealerCashOut(ctx, g, testDealer, testDealer, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DealerCashOut(ctx, old, testDealer, testDealer, 1000); !errors.Is(err, ErrNotInGame) {
+			t.Fatalf("err = %v, want ErrNotInGame", err)
+		}
+		if bank, _ := s.GetBank(ctx, g.ID); bank != 0 || len(db.ledger) != 2 {
+			t.Fatalf("bank = %d, ledger rows = %d; want 0, 2", bank, len(db.ledger))
+		}
+	})
+
+	t.Run("cancel does not overwrite a finished game", func(t *testing.T) {
+		s, _ := newFlowService()
+		g := newTable(t, s)
+		old := stale(g)
+		if _, err := s.DealerCashOut(ctx, g, testDealer, testDealer, 1000); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.EndGame(ctx, g, testDealer, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CancelGame(ctx, old, testDealer); !errors.Is(err, ErrGameNotActive) {
+			t.Fatalf("err = %v, want ErrGameNotActive", err)
+		}
+		mustStatus(t, s, g.ID, domain.GameStatusFinished)
+	})
+
+	t.Run("end does not overwrite a cancelled game", func(t *testing.T) {
+		s, _ := newFlowService()
+		g := newTable(t, s)
+		old := stale(g)
+		if _, err := s.CancelGame(ctx, g, testDealer); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.EndGame(ctx, old, testDealer, true); !errors.Is(err, ErrGameNotActive) {
+			t.Fatalf("err = %v, want ErrGameNotActive", err)
+		}
+		mustStatus(t, s, g.ID, domain.GameStatusCancelled)
+	})
+
+	t.Run("old dealer acts after transfer", func(t *testing.T) {
+		s, _ := newFlowService()
+		g := newTable(t, s)
+		if _, err := s.DealerBuyIn(ctx, g, testDealer, player); err != nil {
+			t.Fatal(err)
+		}
+		old := stale(g)
+		if err := s.DealerTransfer(ctx, g, testDealer, player); err != nil {
+			t.Fatal(err)
+		}
+		if g.DealerTgID != player {
+			t.Fatalf("dealer = %d, want %d", g.DealerTgID, player)
+		}
+		if _, err := s.DealerRebuy(ctx, old, testDealer, player); !errors.Is(err, ErrNotDealer) {
+			t.Fatalf("err = %v, want ErrNotDealer", err)
+		}
+	})
+
+	t.Run("transfer to a player who already left", func(t *testing.T) {
+		s, _ := newFlowService()
+		g := newTable(t, s)
+		if _, err := s.DealerBuyIn(ctx, g, testDealer, player); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DealerCashOut(ctx, g, testDealer, player, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DealerTransfer(ctx, g, testDealer, player); !errors.Is(err, ErrNotInGame) {
+			t.Fatalf("err = %v, want ErrNotInGame", err)
+		}
+	})
 }

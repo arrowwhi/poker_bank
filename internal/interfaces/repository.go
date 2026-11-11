@@ -19,6 +19,8 @@ type PlayerRepository interface {
 type GameRepository interface {
 	Create(ctx context.Context, game *domain.Game) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.Game, error)
+	// LockByID — GetByID с блокировкой строки до конца транзакции (FOR UPDATE).
+	LockByID(ctx context.Context, id int64) (*domain.Game, error)
 	GetActiveByChat(ctx context.Context, chatID int64) (*domain.Game, error)
 	ListFinishedByChat(ctx context.Context, chatID int64, limit int) ([]domain.Game, error)
 	ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain.Game, error)
@@ -28,6 +30,7 @@ type GameRepository interface {
 	Number(ctx context.Context, g *domain.Game) (int, error)
 	SetSettleMessageID(ctx context.Context, id, messageID int64) error
 	GetSettleMessageID(ctx context.Context, id int64) (*int64, error)
+	// UpdateDealer, Finish и Cancel меняют только активную игру; иначе — ошибка с pgx.ErrNoRows.
 	UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error
 	Finish(ctx context.Context, params FinishGameParams) error
 	Cancel(ctx context.Context, id int64) error

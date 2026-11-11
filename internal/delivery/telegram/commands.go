@@ -320,7 +320,12 @@ func (h *Handler) handleTransferDealer(c *Context) error {
 		return c.Reply(fmt.Sprintf("❌ %s не является активным участником игры.", formatPlayerByID(target, target.TelegramUserID)))
 	}
 
-	if err := h.game.TransferDealer(ctx, game.ID, target.TelegramUserID); err != nil {
+	switch err := h.game.DealerTransfer(ctx, game, c.Sender().ID, target.TelegramUserID); {
+	case errors.Is(err, service.ErrNotInGame):
+		return c.Reply(fmt.Sprintf("❌ %s не является активным участником игры.", formatPlayerByID(target, target.TelegramUserID)))
+	case errors.Is(err, service.ErrNotDealer), errors.Is(err, service.ErrGameNotActive):
+		return c.Reply("❌ Передать роль может только дилер активной игры.")
+	case err != nil:
 		return err
 	}
 
@@ -561,8 +566,11 @@ func (h *Handler) handleUndo(c *Context) error {
 		}
 	}
 
-	voided, err := h.game.UndoLast(ctx, game.ID, n)
-	if err != nil {
+	voided, err := h.game.DealerUndo(ctx, game, c.Sender().ID, n)
+	switch {
+	case errors.Is(err, service.ErrNotDealer), errors.Is(err, service.ErrGameNotActive):
+		return c.Reply("❌ Отменять действия может только дилер активной игры.")
+	case err != nil:
 		return err
 	}
 	if len(voided) == 0 {
@@ -1065,8 +1073,8 @@ func (h *Handler) handlePendingCallback(c *Context, parts []string) error {
 // handleDealerJoinCallback выполняет buy-in после подтверждения дилером.
 // Формат data: djoin:<game_id>:<target_tg_id>:yes|no
 func (h *Handler) handleDealerJoinCallback(c *Context, parts []string) error {
-	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) error {
-		return h.game.BuyIn(ctx, game, targetID, c.Sender().ID)
+	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) ([]domain.PendingAction, error) {
+		return h.game.DealerBuyIn(ctx, game, c.Sender().ID, targetID)
 	}, func(game *domain.Game, target *domain.Player, targetID int64) string {
 		return fmt.Sprintf("✅ %s добавлен (buy-in: %d₽ → %d фишек).",
 			formatPlayerByID(target, targetID), game.BuyInRub, game.BuyInChips)
@@ -1076,8 +1084,8 @@ func (h *Handler) handleDealerJoinCallback(c *Context, parts []string) error {
 // handleDealerRebuyCallback выполняет rebuy после подтверждения дилером.
 // Формат data: drebuy:<game_id>:<target_tg_id>:yes|no
 func (h *Handler) handleDealerRebuyCallback(c *Context, parts []string) error {
-	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) error {
-		return h.game.Rebuy(ctx, game, targetID, c.Sender().ID)
+	return h.handleDealerActionCallback(c, parts, func(ctx context.Context, game *domain.Game, targetID int64) ([]domain.PendingAction, error) {
+		return h.game.DealerRebuy(ctx, game, c.Sender().ID, targetID)
 	}, func(game *domain.Game, target *domain.Player, targetID int64) string {
 		return fmt.Sprintf("✅ %s rebuy (%d₽ → %d фишек).",
 			formatPlayerByID(target, targetID), game.RebuyRub, game.RebuyChips)
@@ -1211,16 +1219,20 @@ func (h *Handler) handleDealerCashOutCallback(c *Context, parts []string) error 
 		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать."})
 	}
 
+	if h.dealerButtonUsed(c) {
+		return c.Respond(&CallbackResponse{Text: "Уже обработано."})
+	}
 	if parts[4] == "no" {
+		h.markDealerButtonUsed(c)
 		_ = c.Edit("Отменено.")
 		return c.Respond()
 	}
 
-	cancelled, err := h.game.CashOut(ctx, game, targetID, chips, c.Sender().ID)
+	cancelled, err := h.game.DealerCashOut(ctx, game, c.Sender().ID, targetID, chips)
 	if err != nil {
-		h.log.Error("dealer cashout callback", zap.Error(err))
-		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
+		return h.dealerButtonFailed(c, err)
 	}
+	h.markDealerButtonUsed(c)
 	h.editCancelledPending(cancelled)
 
 	amountRub, _ := game.ChipsToRub(chips)
@@ -1234,7 +1246,7 @@ func (h *Handler) handleDealerCashOutCallback(c *Context, parts []string) error 
 func (h *Handler) handleDealerActionCallback(
 	c *Context,
 	parts []string,
-	execute func(ctx context.Context, game *domain.Game, targetID int64) error,
+	execute func(ctx context.Context, game *domain.Game, targetID int64) ([]domain.PendingAction, error),
 	successText func(game *domain.Game, target *domain.Player, targetID int64) string,
 ) error {
 	if len(parts) != 4 {
@@ -1258,15 +1270,21 @@ func (h *Handler) handleDealerActionCallback(
 		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать."})
 	}
 
+	if h.dealerButtonUsed(c) {
+		return c.Respond(&CallbackResponse{Text: "Уже обработано."})
+	}
 	if parts[3] == "no" {
+		h.markDealerButtonUsed(c)
 		_ = c.Edit("Отменено.")
 		return c.Respond()
 	}
 
-	if err := execute(ctx, game, targetID); err != nil {
-		h.log.Error("dealer action callback", zap.Error(err))
-		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
+	cancelled, err := execute(ctx, game, targetID)
+	if err != nil {
+		return h.dealerButtonFailed(c, err)
 	}
+	h.markDealerButtonUsed(c)
+	h.editCancelledPending(cancelled)
 
 	target, _ := h.player.GetByID(ctx, targetID)
 	_ = c.Edit(successText(game, target, targetID))
@@ -1461,6 +1479,33 @@ func pendingResolvedText(pa *domain.PendingAction) string {
 		return fmt.Sprintf("🚫 %s отменён (игрок вышел).", action)
 	default:
 		return fmt.Sprintf("%s [%s].", action, pa.Status)
+	}
+}
+
+// dealerButtonFailed отвечает на нажатие кнопки djoin/drebuy/dcashout, если сервис
+// отказал. Если повторять действие бессмысленно (игра закрыта, игрок уже сел или вышел),
+// кнопки убираются.
+func (h *Handler) dealerButtonFailed(c *Context, err error) error {
+	switch {
+	case errors.Is(err, service.ErrNotDealer):
+		return c.Respond(&CallbackResponse{Text: "❌ Только дилер может подтверждать."})
+	case errors.Is(err, service.ErrGameNotActive), errors.Is(err, service.ErrNotFound):
+		h.markDealerButtonUsed(c)
+		_ = c.Edit("🚫 Не выполнено: игра уже не активна.")
+		return c.Respond(&CallbackResponse{Text: "Игра уже не активна."})
+	case errors.Is(err, service.ErrAlreadyInGame):
+		h.markDealerButtonUsed(c)
+		_ = c.Edit("🚫 Не выполнено: игрок уже за столом.")
+		return c.Respond(&CallbackResponse{Text: "Игрок уже в игре.", ShowAlert: true})
+	case errors.Is(err, service.ErrNotInGame):
+		h.markDealerButtonUsed(c)
+		_ = c.Edit("🚫 Не выполнено: игрок уже не за столом.")
+		return c.Respond(&CallbackResponse{Text: "Игрок уже не в игре.", ShowAlert: true})
+	case errors.Is(err, service.ErrInvalidChipsAmount):
+		return c.Respond(&CallbackResponse{Text: "❌ Фишки не дают целого числа рублей.", ShowAlert: true})
+	default:
+		h.log.Error("dealer action callback", zap.Error(err))
+		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
 	}
 }
 
