@@ -8,7 +8,7 @@ import { isProportional, perChip, rateLabel } from '../lib/rate';
 import { useNav } from '../router';
 import { useSession } from '../session';
 import { useBackButton, useMainButton } from '../telegram/buttons';
-import { haptic } from '../telegram/telegram';
+import { haptic, startChatId } from '../telegram/telegram';
 
 type Step = 'chat' | 'params' | 'confirm' | 'done';
 const STEP_N: Record<Step, number> = { chat: 1, params: 2, confirm: 3, done: 3 };
@@ -67,10 +67,11 @@ export function NewGame({ chatId }: { chatId?: number }) {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<GameDetail | null>(null);
 
-  // Предвыбор чата из deep-link / параметра.
+  // Предвыбор чата: из deep-link / параметра, а если свободный стол всего один — он.
   useEffect(() => {
     if (!chats.data || chat) return;
-    const c = chats.data.find((x) => x.id === chatId && !x.active_game);
+    const free = chats.data.filter((x) => !x.active_game);
+    const c = free.find((x) => x.id === (chatId ?? startChatId())) ?? (free.length === 1 ? free[0] : null);
     if (c) setChat(c);
   }, [chats.data, chatId, chat]);
 
