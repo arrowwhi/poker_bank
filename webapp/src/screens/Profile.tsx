@@ -26,7 +26,11 @@ export function Profile({ userId, chatId: initialChat }: { userId?: number; chat
   const streak = useMemo(() => (s ? plusStreaks(s.history) : { best: 0, current: 0 }), [s]);
   const bw = useMemo(() => (s ? bestWorst(s.history) : {}), [s]);
 
+  // Отметка уходит одним запросом: повторный тап по той же кнопке, пока она в полёте, игнорируется.
+  const [marking, setMarking] = useState<number | null>(null);
   const markDebt = async (d: OpenDebt) => {
+    if (marking !== null) return;
+    setMarking(d.id);
     try {
       await api.settle(d.game_id);
       haptic.success();
@@ -35,6 +39,8 @@ export function Profile({ userId, chatId: initialChat }: { userId?: number; chat
     } catch (e) {
       haptic.error();
       toast(e instanceof Error ? e.message : 'Ошибка', 'danger');
+    } finally {
+      setMarking(null);
     }
   };
 
@@ -101,7 +107,7 @@ export function Profile({ userId, chatId: initialChat }: { userId?: number; chat
               <ListRow key={d.id}
                 title={d.direction === 'out' ? `Вы должны ${handle(d.to)} ${rub(d.amount_rub)}` : `${handle(d.from)} должен вам ${rub(d.amount_rub)}`}
                 sub={`Игра #${d.game_number} · ${date(d.game_ended_at)}${d.direction === 'in' && d.is_paid ? ' · отметил «оплатил»' : ''}`}
-                right={<button className={`btn btn-sm ${d.direction === 'out' ? 'btn-accent' : 'btn-soft'}`} onClick={() => markDebt(d)}>
+                right={<button className={`btn btn-sm ${d.direction === 'out' ? 'btn-accent' : 'btn-soft'}`} disabled={marking !== null} onClick={() => markDebt(d)}>
                   {d.direction === 'out' ? 'Я оплатил' : 'Я получил'}
                 </button>} />
             ))}

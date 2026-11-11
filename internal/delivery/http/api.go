@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/service"
@@ -39,7 +39,6 @@ type api struct {
 	games    *service.GameService
 	players  *service.PlayerService
 	notifier Notifier
-	log      *zap.Logger
 }
 
 func (a *api) routes(r chi.Router) {
@@ -126,7 +125,7 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, service.ErrBadRate):
 		ae = errStatus(http.StatusUnprocessableEntity, "bad_rate", "Курс rebuy не пропорционален buy-in")
 	default:
-		a.log.Error("mini app api", zap.Error(err), zap.String("path", r.URL.Path))
+		logger.Error(r.Context()).Err(err).Str("path", r.URL.Path).Msg("mini app api")
 		ae = errStatus(http.StatusInternalServerError, "internal", "Что-то пошло не так")
 	}
 
@@ -164,20 +163,30 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-// canSeeChat — пользователь состоит в группе: известен боту или подтверждён Telegram.
+// canSeeChat — пользователь сейчас состоит в группе.
+//
+// Источник правды — Telegram (getChatMember, ответ кэшируется на 5 минут): кто вышел
+// или удалён из группы, теряет доступ, даже если бот запомнил его раньше. Список
+// известных участников (chat_members) приводится в соответствие с ответом. Если
+// Telegram проверить не дал (сеть, бот не в группе), решает то, что известно боту.
 func (a *api) canSeeChat(ctx context.Context, chatID, userID int64) (bool, error) {
-	ok, err := a.games.IsKnownMember(ctx, chatID, userID)
-	if err != nil || ok {
-		return ok, err
-	}
-	ok, err = a.notifier.IsChatMember(ctx, chatID, userID)
+	known, err := a.games.IsKnownMember(ctx, chatID, userID)
 	if err != nil {
-		a.log.Warn("telegram chat member check", zap.Error(err), zap.Int64("chat_id", chatID))
-		return false, nil
+		return false, err
 	}
-	if ok {
+	ok, err := a.notifier.IsChatMember(ctx, chatID, userID)
+	if err != nil {
+		logger.Warn(ctx).Err(err).Int64("chat_id", chatID).Msg("telegram chat member check")
+		return known, nil
+	}
+	switch {
+	case ok && !known:
 		if err := a.games.RememberMember(ctx, chatID, userID); err != nil {
-			a.log.Warn("remember chat member", zap.Error(err))
+			logger.Warn(ctx).Err(err).Msg("remember chat member")
+		}
+	case !ok && known:
+		if err := a.games.ForgetMember(ctx, chatID, userID); err != nil {
+			logger.Warn(ctx).Err(err).Msg("forget chat member")
 		}
 	}
 	return ok, nil
@@ -241,7 +250,7 @@ func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	// /api/me — первый запрос приложения при открытии. start_param пишем всегда, в том числе
 	// пустой: по логу видно, дошёл ли до приложения параметр startapp из ссылки.
 	if id, ok := IdentityFrom(ctx); ok {
-		a.log.Info("mini app session", zap.Int64("user_id", uid), zap.String("start_param", id.StartParam))
+		logger.Info(ctx).Int64("user_id", uid).Str("start_param", id.StartParam).Msg("mini app session")
 	}
 
 	out := meDTO{User: b.user(ctx, uid), MemberSince: time.Now()}
@@ -632,7 +641,7 @@ func (a *api) buyIn(w http.ResponseWriter, r *http.Request) {
 	// Игрока, который ни разу не писал боту и не открывал приложение, нет в players:
 	// записать его в ledger нельзя (ТЗ §11 — просим его самого написать /join).
 	if _, err := a.players.GetByID(ctx, *req.UserID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			a.fail(w, r, errStatus(http.StatusConflict, "not_registered",
 				"Игрок ещё не знаком боту — пусть напишет /join в группе или откроет приложение"))
 			return

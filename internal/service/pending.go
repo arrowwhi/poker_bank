@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -13,12 +13,11 @@ import (
 // PendingService manages pending action records awaiting dealer confirmation.
 type PendingService struct {
 	pending interfaces.PendingActionRepository
-	log     *zap.Logger
 }
 
 // NewPendingService creates a new PendingService backed by the given repository.
-func NewPendingService(pending interfaces.PendingActionRepository, log *zap.Logger) *PendingService {
-	return &PendingService{pending: pending, log: log}
+func NewPendingService(pending interfaces.PendingActionRepository) *PendingService {
+	return &PendingService{pending: pending}
 }
 
 // Create stores a new pending action and returns its generated ID.
@@ -51,11 +50,11 @@ func (s *PendingService) Resolve(ctx context.Context, id int64, status domain.Pe
 func (s *PendingService) ExpirePending(ctx context.Context, ttl time.Duration) []domain.PendingAction {
 	expired, err := s.pending.ExpireOlderThan(ctx, ttl)
 	if err != nil {
-		s.log.Error("expire pending actions", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("expire pending actions")
 		return nil
 	}
 	if len(expired) > 0 {
-		s.log.Info("expired pending actions", zap.Int("count", len(expired)))
+		logger.Info(ctx).Int("count", len(expired)).Msg("expired pending actions")
 	}
 	return expired
 }

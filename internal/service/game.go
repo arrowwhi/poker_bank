@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jackc/pgx/v5"
-	"go.uber.org/zap"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -22,7 +22,6 @@ type GameService struct {
 	chats        interfaces.ChatRepository
 	tx           interfaces.TxManager
 	exporter     interfaces.SheetsExporter
-	log          *zap.Logger
 }
 
 // NewGameService creates a GameService wired to the provided repository implementations.
@@ -36,7 +35,6 @@ func NewGameService(
 	chats interfaces.ChatRepository,
 	tx interfaces.TxManager,
 	exporter interfaces.SheetsExporter,
-	log *zap.Logger,
 ) *GameService {
 	return &GameService{
 		games:        games,
@@ -48,7 +46,6 @@ func NewGameService(
 		chats:        chats,
 		tx:           tx,
 		exporter:     exporter,
-		log:          log,
 	}
 }
 
@@ -67,7 +64,7 @@ func (s *GameService) NewGame(ctx context.Context, g *domain.Game) (int64, error
 func (s *GameService) createSheetAsync(gameID int64) {
 	go func() {
 		if err := s.exporter.CreateGameSheet(context.Background(), gameID); err != nil {
-			s.log.Error("создание листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
+			logger.Error(context.Background()).Int64("game_id", gameID).Err(err).Msg("создание листа Google Sheets")
 		}
 	}()
 }
@@ -76,7 +73,7 @@ func (s *GameService) createSheetAsync(gameID int64) {
 func (s *GameService) syncSheetAsync(gameID int64) {
 	go func() {
 		if err := s.exporter.SyncGame(context.Background(), gameID); err != nil {
-			s.log.Error("синхронизация листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
+			logger.Error(context.Background()).Int64("game_id", gameID).Err(err).Msg("синхронизация листа Google Sheets")
 		}
 	}()
 }
@@ -85,7 +82,7 @@ func (s *GameService) syncSheetAsync(gameID int64) {
 func (s *GameService) GetActiveGame(ctx context.Context, chatID int64) (*domain.Game, error) {
 	g, err := s.games.GetActiveByChat(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return nil, ErrNoActiveGame
 		}
 		return nil, err
@@ -93,10 +90,11 @@ func (s *GameService) GetActiveGame(ctx context.Context, chatID int64) (*domain.
 	return g, nil
 }
 
-// Finish завершает игру: считает агрегаты и переводы, записывает их в одной транзакции.
+// finish завершает игру внутри транзакции вызывающего (игра заблокирована): считает
+// агрегаты и переводы по ledger и записывает их вместе со сменой статуса (ТЗ §6).
 // bankDelta — расхождение банка (0 для обычного /endgame, != 0 для /endgame_force).
 // Возвращает рассчитанный план переводов для отображения в чате.
-func (s *GameService) Finish(ctx context.Context, gameID int64, bankDelta int) ([]domain.Settlement, error) {
+func (s *GameService) finish(ctx context.Context, gameID int64, bankDelta int) ([]domain.Settlement, error) {
 	entries, err := s.ledger.ListByGame(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -116,11 +114,8 @@ func (s *GameService) Finish(ctx context.Context, gameID int64, bankDelta int) (
 		Settlements:  settlements,
 		BankDeltaRub: bankDelta,
 	}); err != nil {
-		return nil, err
+		return nil, notActiveErr(err)
 	}
-
-	s.syncSheetAsync(gameID)
-
 	return settlements, nil
 }
 
@@ -138,29 +133,6 @@ func (s *GameService) MarkSettlementsByPlayer(ctx context.Context, gameID, tgID 
 // GetGame retrieves a game by its primary key.
 func (s *GameService) GetGame(ctx context.Context, id int64) (*domain.Game, error) {
 	return s.games.GetByID(ctx, id)
-}
-
-// TransferDealer reassigns the dealer role to another player in the game.
-func (s *GameService) TransferDealer(ctx context.Context, gameID int64, newDealerTgID int64) error {
-	return s.games.UpdateDealer(ctx, gameID, newDealerTgID)
-}
-
-// Cancel marks a game as cancelled without computing results.
-func (s *GameService) Cancel(ctx context.Context, gameID int64) error {
-	return s.games.Cancel(ctx, gameID)
-}
-
-// BuyIn records a BUY_IN ledger entry and adds the player as a participant.
-// Обе записи — одной транзакцией: buy-in без участника (и наоборот) не остаётся.
-func (s *GameService) BuyIn(ctx context.Context, game *domain.Game, playerTgID int64, createdByTgID int64) error {
-	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		return s.recordBuyIn(ctx, game, playerTgID, createdByTgID)
-	})
-	if err != nil {
-		return err
-	}
-	s.syncSheetAsync(game.ID)
-	return nil
 }
 
 // recordBuyIn пишет BUY_IN и участника внутри транзакции вызывающего.
@@ -183,8 +155,8 @@ func (s *GameService) recordBuyIn(ctx context.Context, game *domain.Game, player
 	})
 }
 
-// Rebuy records a REBUY ledger entry.
-func (s *GameService) Rebuy(ctx context.Context, game *domain.Game, playerTgID int64, createdByTgID int64) error {
+// recordRebuy пишет REBUY внутри транзакции вызывающего.
+func (s *GameService) recordRebuy(ctx context.Context, game *domain.Game, playerTgID int64, createdByTgID int64) error {
 	entry := &domain.LedgerEntry{
 		GameID:        game.ID,
 		PlayerTgID:    playerTgID,
@@ -193,17 +165,14 @@ func (s *GameService) Rebuy(ctx context.Context, game *domain.Game, playerTgID i
 		AmountChips:   game.RebuyChips,
 		CreatedByTgID: createdByTgID,
 	}
-	if _, err := s.ledger.Create(ctx, entry); err != nil {
-		return err
-	}
-	s.syncSheetAsync(game.ID)
-	return nil
+	_, err := s.ledger.Create(ctx, entry)
+	return err
 }
 
-// CashOut records a CASH_OUT ledger entry, deactivates the participant and cancels
-// any pending actions for the player (e.g. an outstanding REBUY request).
-// Returns cancelled pending actions so the caller can edit those Telegram messages.
-func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID int64, chips int, dealerTgID int64) ([]domain.PendingAction, error) {
+// recordCashOut пишет CASH_OUT, снимает игрока со стола и отменяет его висящие запросы
+// (например, REBUY) внутри транзакции вызывающего. Возвращает отменённые запросы, чтобы
+// вызывающий поправил их сообщения в Telegram.
+func (s *GameService) recordCashOut(ctx context.Context, game *domain.Game, playerTgID int64, chips int, dealerTgID int64) ([]domain.PendingAction, error) {
 	amountRub, ok := game.ChipsToRub(chips)
 	if !ok {
 		return nil, ErrInvalidChipsAmount
@@ -223,16 +192,12 @@ func (s *GameService) CashOut(ctx context.Context, game *domain.Game, playerTgID
 	if err := s.participants.SetActive(ctx, game.ID, playerTgID, false); err != nil {
 		return nil, err
 	}
-	cancelled, err := s.pending.CancelByPlayer(ctx, game.ID, playerTgID)
-	if err != nil {
-		s.log.Warn("cancel pending actions on cashout", zap.Error(err))
-	}
-	s.syncSheetAsync(game.ID)
-	return cancelled, nil
+	return s.pending.CancelByPlayer(ctx, game.ID, playerTgID)
 }
 
 // UndoLast аннулирует последние N записей леджера и восстанавливает места игроков.
-// Возвращает аннулированные записи для отображения в чате.
+// Возвращает аннулированные записи для отображения в чате. Вызывается внутри
+// транзакции DealerUndo, где игра заблокирована и проверены права дилера.
 //
 // Место каждого затронутого игрока пересчитывается по оставшимся записям, а не по
 // типу аннулированной: порядок строк из VoidLastN не гарантирован, и при откате сразу
@@ -271,9 +236,6 @@ func (s *GameService) UndoLast(ctx context.Context, gameID int64, n int) ([]doma
 	})
 	if err != nil {
 		return nil, err
-	}
-	if len(voided) > 0 {
-		s.syncSheetAsync(gameID)
 	}
 	return voided, nil
 }

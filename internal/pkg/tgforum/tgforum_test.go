@@ -134,3 +134,21 @@ func TestChatMember(t *testing.T) {
 		t.Fatal("InChat")
 	}
 }
+
+// Сервисное сообщение «участник вышел» сохраняется в Info: по нему бот закрывает
+// вышедшему доступ к группе в Mini App.
+func TestRecordLeftChatMember(t *testing.T) {
+	tr := NewTracker()
+
+	var u rawUpdate
+	if err := json.Unmarshal([]byte(`{"update_id":8,"message":{"message_id":3,"date":1,
+		"chat":{"id":-100,"type":"supergroup"},"from":{"id":9,"is_bot":false,"first_name":"u"},
+		"left_chat_member":{"id":9,"is_bot":false,"first_name":"u"}}}`), &u); err != nil {
+		t.Fatal(err)
+	}
+	tr.record([]rawUpdate{u})
+
+	if got := tr.entries[8].info.LeftUserID; got != 9 {
+		t.Fatalf("LeftUserID = %d, want 9", got)
+	}
+}

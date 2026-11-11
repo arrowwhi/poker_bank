@@ -52,6 +52,27 @@ func (r *GameRepo) GetByID(ctx context.Context, id int64) (*domain.Game, error) 
 	return g, nil
 }
 
+// LockByID читает игру и блокирует её строку до конца транзакции (SELECT … FOR UPDATE).
+// Вызывается первым в каждой изменяющей транзакции стола: операции над одной игрой
+// выполняются по очереди, и проверки делаются по актуальному состоянию.
+func (r *GameRepo) LockByID(ctx context.Context, id int64) (*domain.Game, error) {
+	g := &domain.Game{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, chat_id, dealer_tg_id, buy_in_rub, buy_in_chips, rebuy_rub, rebuy_chips,
+		       status, started_at, ended_at, bank_delta_rub
+		FROM games WHERE id = $1
+		FOR UPDATE
+	`, id).Scan(
+		&g.ID, &g.ChatID, &g.DealerTgID,
+		&g.BuyInRub, &g.BuyInChips, &g.RebuyRub, &g.RebuyChips,
+		&g.Status, &g.StartedAt, &g.EndedAt, &g.BankDeltaRub,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lock game: %w", err)
+	}
+	return g, nil
+}
+
 // GetActiveByChat returns the currently active game for the given chat, or an error if none exists.
 func (r *GameRepo) GetActiveByChat(ctx context.Context, chatID int64) (*domain.Game, error) {
 	g := &domain.Game{}
@@ -131,21 +152,38 @@ func (r *GameRepo) ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain
 	return games, rows.Err()
 }
 
-// UpdateDealer sets a new dealer for the given game.
+// UpdateDealer sets a new dealer for the given active game. Если игра уже не активна,
+// возвращает ошибку, оборачивающую infrapg.ErrNoRows.
 func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE games SET dealer_tg_id = $1 WHERE id = $2`,
+	tag, err := r.db.Exec(ctx,
+		`UPDATE games SET dealer_tg_id = $1 WHERE id = $2 AND status = 'active'`,
 		dealerTgID, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update dealer: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update dealer: game %d is not active: %w", id, infrapg.ErrNoRows)
+	}
 	return nil
 }
 
-// Finish executes the end-game transaction: writes game_results, settlements, updates status.
+// Finish executes the end-game transaction: updates status, writes game_results and settlements.
+// Статус меняется только у активной игры; иначе — ошибка, оборачивающая infrapg.ErrNoRows,
+// и ничего не записывается.
 func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParams) error {
 	return r.db.InTx(ctx, func(ctx context.Context) error {
+		tag, err := r.db.Exec(ctx, `
+			UPDATE games SET status = 'finished', ended_at = now(), bank_delta_rub = $1
+			WHERE id = $2 AND status = 'active'
+		`, params.BankDeltaRub, params.GameID)
+		if err != nil {
+			return fmt.Errorf("finish game: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("finish game: game %d is not active: %w", params.GameID, infrapg.ErrNoRows)
+		}
+
 		for _, res := range params.Results {
 			_, err := r.db.Exec(ctx, `
 				INSERT INTO game_results
@@ -169,25 +207,22 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 				return fmt.Errorf("insert settlement: %w", err)
 			}
 		}
-
-		_, err := r.db.Exec(ctx, `
-			UPDATE games SET status = 'finished', ended_at = now(), bank_delta_rub = $1 WHERE id = $2
-		`, params.BankDeltaRub, params.GameID)
-		if err != nil {
-			return fmt.Errorf("finish game: %w", err)
-		}
 		return nil
 	})
 }
 
-// Cancel marks a game as cancelled and records the end time.
+// Cancel marks an active game as cancelled and records the end time. Если игра уже
+// не активна, возвращает ошибку, оборачивающую infrapg.ErrNoRows.
 func (r *GameRepo) Cancel(ctx context.Context, id int64) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE games SET status = 'cancelled', ended_at = now() WHERE id = $1`,
+	tag, err := r.db.Exec(ctx,
+		`UPDATE games SET status = 'cancelled', ended_at = now() WHERE id = $1 AND status = 'active'`,
 		id,
 	)
 	if err != nil {
 		return fmt.Errorf("cancel game: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("cancel game: game %d is not active: %w", id, infrapg.ErrNoRows)
 	}
 	return nil
 }

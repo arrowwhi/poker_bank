@@ -33,6 +33,8 @@ export interface MainButtonConfig {
   disabled?: boolean;
   progress?: boolean;
   tone?: MainButtonTone;
+  /** Скрыть кнопку, перекрыв нижележащих владельцев (модальный диалог поверх экрана). */
+  hidden?: boolean;
 }
 
 const mainStack = createStack<MainButtonConfig>();
@@ -43,7 +45,7 @@ export function useMainButton(cfg: MainButtonConfig | null) {
   const id = useId();
   const ref = useRef(cfg);
   ref.current = cfg;
-  const key = cfg ? `${cfg.text}|${cfg.disabled}|${cfg.progress}|${cfg.tone}` : '';
+  const key = cfg ? `${cfg.text}|${cfg.disabled}|${cfg.progress}|${cfg.tone}|${cfg.hidden}` : '';
   useLayoutEffect(() => {
     if (!ref.current) { mainStack.remove(id); return; }
     mainStack.set(id, { ...ref.current, onClick: () => ref.current?.onClick() });
@@ -83,7 +85,7 @@ function NativeMain() {
   const theme = useThemeVersion(); // цвета кнопки берутся из токенов — перекрашиваем при смене темы
   useEffect(() => {
     const mb = tg.MainButton;
-    if (!cfg) { mb.hide(); return; }
+    if (!cfg || cfg.hidden) { mb.hide(); return; }
     const [bg, fg] = toneVar[cfg.disabled ? 'neutral' : cfg.tone ?? 'accent'];
     const color = cssVar(bg);
     const text_color = cssVar(fg);
@@ -111,7 +113,7 @@ function NativeBack() {
 /** Браузерная заглушка MainButton (вне Telegram). */
 function FallbackMain() {
   const cfg = useTop(mainStack);
-  if (!cfg) return null;
+  if (!cfg || cfg.hidden) return null;
   return (
     <div className="mainbar">
       <button
@@ -163,7 +165,8 @@ export function FallbackHeader({ title, subtitle, onMenu, overlay }: { title: st
 
 /** Есть ли сейчас видимая MainButton — для нижнего отступа контента. */
 export function useHasMainButton() {
-  return !!useTop(mainStack);
+  const cfg = useTop(mainStack);
+  return !!cfg && !cfg.hidden;
 }
 
 export function TelegramButtons() {

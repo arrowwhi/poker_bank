@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/arrowwhi/infrastructure/connections/postgres/migrate"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 	"github.com/arrowwhi/infrastructure/observability/metrics"
 	"github.com/arrowwhi/infrastructure/observability/tracing"
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/config"
 	httpdelivery "poker_bank/internal/delivery/http"
@@ -35,7 +35,7 @@ var version = "dev"
 const pendingTTL = 30 * time.Minute
 
 // Run поднимает сервис и блокируется до SIGINT/SIGTERM.
-func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
+func Run(ctx context.Context, cfg *config.Config) error {
 	a, err := tg.NewApp(ctx, infraConfig(cfg))
 	if err != nil {
 		return fmt.Errorf("init app: %w", err)
@@ -66,15 +66,15 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 	chatTopicRepo := postgres.NewChatTopicRepo(pool)
 
 	// Services
-	playerSvc := service.NewPlayerService(playerRepo, log)
+	playerSvc := service.NewPlayerService(playerRepo)
 
 	var exporter interfaces.SheetsExporter = service.NewNoopSheetsExporter()
 	if cfg.SheetsEnabled() {
 		sheetsClient, sErr := sheets.NewClient(ctx, cfg.GoogleSheetsCredentialsFile, cfg.GoogleSheetsSpreadsheetID)
 		if sErr != nil {
-			log.Error("инициализация Google Sheets клиента", zap.Error(sErr))
+			logger.Error(ctx).Err(sErr).Msg("инициализация Google Sheets клиента")
 		} else {
-			exporter = service.NewGoogleSheetsExporter(sheetsClient, gameRepo, ledgerRepo, settlementRepo, playerRepo, log)
+			exporter = service.NewGoogleSheetsExporter(sheetsClient, gameRepo, ledgerRepo, settlementRepo, playerRepo)
 		}
 	}
 
@@ -82,9 +82,9 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 		gameRepo, ledgerRepo, participantRepo,
 		resultRepo, settlementRepo, pendingRepo,
 		postgres.NewChatRepo(pool), postgres.NewTxManager(pool),
-		exporter, log,
+		exporter,
 	)
-	pendingSvc := service.NewPendingService(pendingRepo, log)
+	pendingSvc := service.NewPendingService(pendingRepo)
 
 	// Telegram bot. Tracker достаёт топик форума из сырых обновлений (polling — через
 	// транспорт клиента Bot API, webhook — через обёртку обработчика).
@@ -101,7 +101,7 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 	bot, err := tg.New(botCfg,
 		tg.WithAPIClient(client),
 		tg.WithErrorHandler(func(c *tg.Context, err error) {
-			log.Error("telegram handler", zap.Error(err), zap.Int64("chat_id", c.ChatID()), zap.String("route", c.Route()))
+			logger.Error(c).Err(err).Int64("chat_id", c.ChatID()).Str("route", c.Route()).Msg("telegram handler")
 		}),
 	)
 	if err != nil {
@@ -110,14 +110,14 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 	}
 	a.Health().Register("telegram", bot.Healthcheck)
 
-	h := telegram.NewHandler(forum, gameSvc, playerSvc, pendingSvc, fsmRepo, chatTopicRepo, log)
+	h := telegram.NewHandler(forum, gameSvc, playerSvc, pendingSvc, fsmRepo, chatTopicRepo)
 	h.SetWebAppShortName(cfg.WebAppShortName)
 	h.Register(bot)
 
 	// HTTP: API Mini App, фронтенд и (в режиме webhook) обновления Telegram.
 	assets, err := webapp.Assets()
 	if err != nil {
-		log.Warn("mini app assets are not embedded, serving api only", zap.Error(err))
+		logger.Warn(ctx).Err(err).Msg("mini app assets are not embedded, serving api only")
 		assets = nil
 	}
 
@@ -125,7 +125,6 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 		Games:           gameSvc,
 		Players:         playerSvc,
 		Notifier:        h,
-		Log:             log,
 		Health:          a.Health(),
 		WebAssets:       assets,
 		ServiceName:     serviceName,
@@ -144,9 +143,9 @@ func Run(ctx context.Context, cfg *config.Config, log *zap.Logger) error {
 		return fmt.Errorf("create http server: %w", err)
 	}
 
-	log.Info("starting poker-bank", zap.String("telegram_mode", cfg.TelegramMode), zap.String("http_port", cfg.HTTPPort))
+	logger.Info(ctx).Str("telegram_mode", cfg.TelegramMode).Str("http_port", cfg.HTTPPort).Msg("starting poker-bank")
 
-	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc, h), publishMenuJob(client, log))
+	return a.Run(ctx, bot, srv, expirePendingJob(pendingSvc, h), publishMenuJob(client))
 }
 
 // expirePendingJob раз в минуту переводит старые pending-запросы в expired
@@ -169,10 +168,10 @@ func expirePendingJob(pending *service.PendingService, h *telegram.Handler) tg.C
 
 // publishMenuJob публикует меню команд Telegram при старте. Меню — косметика:
 // ошибка только логируется, компонент живёт до остановки сервиса.
-func publishMenuJob(client *tg.Client, log *zap.Logger) tg.ComponentFunc {
+func publishMenuJob(client *tg.Client) tg.ComponentFunc {
 	return func(ctx context.Context) error {
 		if err := client.SetMyCommands(ctx, telegram.MenuCommands()); err != nil && ctx.Err() == nil {
-			log.Warn("set bot commands", zap.Error(err))
+			logger.Warn(ctx).Err(err).Msg("set bot commands")
 		}
 
 		<-ctx.Done()
@@ -191,8 +190,7 @@ func infraConfig(cfg *config.Config) tg.AppConfig {
 		Admin:           tg.AdminConfig{Host: "0.0.0.0", Port: cfg.AdminPort, Enabled: cfg.AdminPort != ""},
 	}
 
-	// Логгер инфраструктуры пишет только её собственные события (старт, остановка, бот, HTTP);
-	// логи poker_bank идут через zap.
+	// Один логгер на весь сервис: инфраструктура и poker_bank пишут через observability/logger.
 	ac.Logger.Level = cfg.LogLevel
 	ac.Logger.Masking = true
 

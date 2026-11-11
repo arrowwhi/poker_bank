@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/interfaces"
 	"poker_bank/internal/pkg/tgforum"
@@ -21,7 +20,6 @@ type Handler struct {
 	pending   *service.PendingService
 	fsm       interfaces.FSMStateRepository
 	chatTopic interfaces.ChatTopicRepository
-	log       *zap.Logger
 
 	// lastHintAt throttles the "wrong topic" hint to at most once per hour per chat.
 	hintMu     sync.Mutex
@@ -30,6 +28,11 @@ type Handler struct {
 	// memberCache — ответы getChatMember для проверки доступа Mini App.
 	memberMu    sync.Mutex
 	memberCache map[[2]int64]memberCacheEntry
+
+	// usedButtons — сообщения с кнопками djoin/drebuy/dcashout, по которым дилер уже
+	// принял решение (dealer_buttons.go).
+	buttonsMu   sync.Mutex
+	usedButtons map[[2]int64]time.Time
 
 	// webAppShortName и botUsername — из чего собирается ссылка на Mini App (webapp_link.go).
 	webAppShortName string
@@ -47,7 +50,6 @@ func NewHandler(
 	pending *service.PendingService,
 	fsm interfaces.FSMStateRepository,
 	chatTopic interfaces.ChatTopicRepository,
-	log *zap.Logger,
 ) *Handler {
 	return &Handler{
 		forum:       forum,
@@ -56,9 +58,9 @@ func NewHandler(
 		pending:     pending,
 		fsm:         fsm,
 		chatTopic:   chatTopic,
-		log:         log,
 		lastHintAt:  make(map[int64]time.Time),
 		memberCache: make(map[[2]int64]memberCacheEntry),
+		usedButtons: make(map[[2]int64]time.Time),
 		botCommands: map[string]bool{
 			"/start":           true,
 			"/help":            true,

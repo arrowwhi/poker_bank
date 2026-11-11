@@ -50,6 +50,9 @@ func ComputeGameResults(gameID int64, entries []domain.LedgerEntry) []domain.Gam
 			NetRub:        a.totalOutRub - a.totalInRub,
 		})
 	}
+	// Порядок итерации по map случаен — сортируем, чтобы план переводов для одной и той же
+	// игры всегда получался одинаковым.
+	sort.Slice(results, func(i, j int) bool { return results[i].PlayerTgID < results[j].PlayerTgID })
 	return results
 }
 
@@ -72,8 +75,10 @@ func ComputeGameResults(gameID int64, entries []domain.LedgerEntry) []domain.Gam
 //	Должники платят ровно то, что проиграли (NetRub не меняется).
 //	Выигрыш кредиторов пропорционально УМЕНЬШАЕТСЯ, пока Y не сравняется с X.
 //
-// Остаток от целочисленного деления достаётся записи с наибольшим по модулю
-// NetRub на скорректированной стороне.
+// Округление — методом наибольших остатков: каждый получает целую часть своей доли,
+// оставшиеся рубли раздаются по одному тем, у кого дробная часть доли больше
+// (при равенстве — меньший tg_id). Так ни у кого срез не превышает его долю, округлённую
+// вверх, и никто не переходит на другую сторону: проигравший не начинает получать деньги.
 func ApplyBankDelta(results []domain.GameResult, delta int) []domain.GameResult {
 	if delta == 0 {
 		return results
@@ -82,58 +87,59 @@ func ApplyBankDelta(results []domain.GameResult, delta int) []domain.GameResult 
 	copy(adj, results)
 
 	if delta > 0 {
-		// Долг больше выигрыша — уменьшаем долг должников.
-		total := 0
-		for _, r := range adj {
-			if r.NetRub < 0 {
-				total += -r.NetRub
-			}
-		}
-		if total == 0 {
-			return adj
-		}
-		distributed, maxIdx := 0, -1
-		for i := range adj {
-			if adj[i].NetRub < 0 {
-				cut := delta * (-adj[i].NetRub) / total
-				adj[i].NetRub += cut // долг уменьшается (к нулю)
-				distributed += cut
-				if maxIdx == -1 || (-adj[i].NetRub) > (-adj[maxIdx].NetRub) {
-					maxIdx = i
-				}
-			}
-		}
-		if rem := delta - distributed; rem != 0 && maxIdx >= 0 {
-			adj[maxIdx].NetRub += rem
-		}
+		// Долг больше выигрыша — уменьшаем долг должников (их NetRub < 0 растёт к нулю).
+		shrinkSide(adj, delta, func(net int) int { return -net }, +1)
 	} else {
-		// Выигрыш больше долга — уменьшаем выигрыш кредиторов.
-		absDelta := -delta
-		total := 0
-		for _, r := range adj {
-			if r.NetRub > 0 {
-				total += r.NetRub
-			}
-		}
-		if total == 0 {
-			return adj
-		}
-		distributed, maxIdx := 0, -1
-		for i := range adj {
-			if adj[i].NetRub > 0 {
-				cut := absDelta * adj[i].NetRub / total
-				adj[i].NetRub -= cut // выигрыш уменьшается (к нулю)
-				distributed += cut
-				if maxIdx == -1 || adj[i].NetRub > adj[maxIdx].NetRub {
-					maxIdx = i
-				}
-			}
-		}
-		if rem := absDelta - distributed; rem != 0 && maxIdx >= 0 {
-			adj[maxIdx].NetRub -= rem
-		}
+		// Выигрыш больше долга — уменьшаем выигрыш кредиторов (их NetRub > 0 падает к нулю).
+		shrinkSide(adj, -delta, func(net int) int { return net }, -1)
 	}
 	return adj
+}
+
+// shrinkSide уменьшает модули одной стороны (size(net) > 0) суммарно на cut пропорционально
+// размеру, методом наибольших остатков. dir — в какую сторону двигается NetRub (+1 / -1).
+// cut не может превышать сумму размеров стороны: delta = X - Y по тем же записям.
+func shrinkSide(adj []domain.GameResult, cut int, size func(net int) int, dir int) {
+	type share struct {
+		idx int
+		rem int
+	}
+	total := 0
+	for _, r := range adj {
+		if v := size(r.NetRub); v > 0 {
+			total += v
+		}
+	}
+	if total == 0 {
+		return
+	}
+	if cut > total {
+		cut = total
+	}
+
+	shares := make([]share, 0, len(adj))
+	distributed := 0
+	for i, r := range adj {
+		v := size(r.NetRub)
+		if v <= 0 {
+			continue
+		}
+		exact := cut * v
+		base := exact / total
+		adj[i].NetRub += dir * base
+		distributed += base
+		shares = append(shares, share{idx: i, rem: exact % total})
+	}
+
+	sort.SliceStable(shares, func(i, j int) bool {
+		if shares[i].rem != shares[j].rem {
+			return shares[i].rem > shares[j].rem
+		}
+		return adj[shares[i].idx].PlayerTgID < adj[shares[j].idx].PlayerTgID
+	})
+	for k := 0; k < cut-distributed; k++ {
+		adj[shares[k].idx].NetRub += dir
+	}
 }
 
 // ComputeSettlements вычисляет минимальный набор переводов по результатам игры.
@@ -198,7 +204,12 @@ func ComputeSettlements(gameID int64, results []domain.GameResult) []domain.Sett
 		return x
 	}
 	sortByAbs := func(s []entry) {
-		sort.Slice(s, func(i, j int) bool { return absVal(s[i].net) > absVal(s[j].net) })
+		sort.SliceStable(s, func(i, j int) bool {
+			if absVal(s[i].net) != absVal(s[j].net) {
+				return absVal(s[i].net) > absVal(s[j].net)
+			}
+			return s[i].tgID < s[j].tgID
+		})
 	}
 	sortByAbs(debtors)
 	sortByAbs(creditors)

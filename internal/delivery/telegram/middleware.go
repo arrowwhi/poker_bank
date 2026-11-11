@@ -3,7 +3,7 @@ package telegram
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
 
@@ -20,14 +20,18 @@ func (h *Handler) UpsertPlayer(next tg.HandlerFunc) tg.HandlerFunc {
 				DisplayName:    u.FirstName + " " + u.LastName,
 			}
 			if err := h.player.Upsert(context.Background(), p); err != nil {
-				h.log.Warn("upsert player", zap.Error(err), zap.Int64("tg_id", u.ID))
+				logger.Warn(c).Err(err).Int64("tg_id", u.ID).Msg("upsert player")
 			}
 			// Группа и её участник: из них Mini App строит список столов и picker игроков.
 			if chat := c.Update.Chat(); chat != nil && !chat.IsPrivate() {
 				err := h.game.RememberChat(context.Background(),
 					&domain.Chat{ID: chat.ID, Title: chat.Title, Type: chat.Type}, u.ID)
 				if err != nil {
-					h.log.Warn("remember chat", zap.Error(err), zap.Int64("chat_id", chat.ID))
+					logger.Warn(c).Err(err).Int64("chat_id", chat.ID).Msg("remember chat")
+				}
+				// Участник вышел или его удалили: доступ к группе в Mini App закрывается сразу.
+				if left := h.forum.Info(c).LeftUserID; left != 0 {
+					h.forgetMember(chat.ID, left)
 				}
 			}
 		}

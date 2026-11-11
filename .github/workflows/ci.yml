@@ -64,8 +64,24 @@ jobs:
     needs: [lint, test, webapp]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
+      # Токен Coolify даёт полный доступ к серверу (деплой, секреты окружения), поэтому
+      # уходит только по HTTPS. Адрес и приложение — в секретах репозитория:
+      #   COOLIFY_URL       — https://<домен Coolify>, без завершающего /
+      #   COOLIFY_APP_UUID  — uuid приложения poker-bank в Coolify
+      #   COOLIFY_TOKEN     — API-токен с правом deploy
       - name: Trigger Coolify deploy
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
-          curl --fail -X POST \
-            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
-            "http://45.129.142.96:8000/api/v1/deploy?uuid=ktny51ybdi8veuikvnofbmnj&force=false"
+          case "$COOLIFY_URL" in
+            https://*) ;;
+            *) echo "::error::COOLIFY_URL должен начинаться с https:// — токен не отправляется по открытому каналу"; exit 1 ;;
+          esac
+          if [ -z "$COOLIFY_APP_UUID" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::error::не заданы секреты COOLIFY_APP_UUID / COOLIFY_TOKEN"; exit 1
+          fi
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 -X POST \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"

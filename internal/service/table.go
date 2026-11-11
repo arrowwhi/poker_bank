@@ -7,8 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"go.uber.org/zap"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
@@ -47,7 +46,7 @@ type EndResult struct {
 // GameByID возвращает игру или ErrNotFound.
 func (s *GameService) GameByID(ctx context.Context, id int64) (*domain.Game, error) {
 	g, err := s.games.GetByID(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return g, err
@@ -70,10 +69,48 @@ func requireActiveDealer(g *domain.Game, userID int64) error {
 	return nil
 }
 
+// lockGame блокирует строку игры до конца текущей транзакции (SELECT … FOR UPDATE)
+// и возвращает её актуальное состояние. Каждая изменяющая операция стола начинается
+// с неё: операции над одной игрой из бота и Mini App выполняются по очереди, и
+// проверки «игра активна», «игрок за столом» не устаревают до записи.
+// *g обновляется актуальными данными, чтобы вызывающий видел то же, что и сервис.
+func (s *GameService) lockGame(ctx context.Context, g *domain.Game) (*domain.Game, error) {
+	cur, err := s.games.LockByID(ctx, g.ID)
+	if errors.Is(err, infrapg.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	*g = *cur
+	return cur, nil
+}
+
+// lockDealer — lockGame с проверкой, что игра активна и userID — её дилер.
+func (s *GameService) lockDealer(ctx context.Context, g *domain.Game, userID int64) (*domain.Game, error) {
+	cur, err := s.lockGame(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireActiveDealer(cur, userID); err != nil {
+		return nil, err
+	}
+	return cur, nil
+}
+
+// notActiveErr переводит отказ репозитория изменить неактивную игру (infrapg.ErrNoRows
+// от Finish/Cancel/UpdateDealer) в ErrGameNotActive.
+func notActiveErr(err error) error {
+	if errors.Is(err, infrapg.ErrNoRows) {
+		return ErrGameNotActive
+	}
+	return err
+}
+
 // IsActivePlayer сообщает, сидит ли игрок за столом (buy-in без cash-out).
 func (s *GameService) IsActivePlayer(ctx context.Context, gameID, tgID int64) (bool, error) {
 	p, err := s.participants.GetByPlayer(ctx, gameID, tgID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -85,81 +122,95 @@ func (s *GameService) IsActivePlayer(ctx context.Context, gameID, tgID int64) (b
 // CreateRequest создаёт запрос игрока на подтверждение дилером. Если запрашивает сам
 // дилер, действие записывается сразу, без подтверждения.
 func (s *GameService) CreateRequest(ctx context.Context, g *domain.Game, userID int64, t domain.ActionType, chips int) (*RequestResult, error) {
-	if err := requireActive(g); err != nil {
-		return nil, err
-	}
-
-	active, err := s.IsActivePlayer(ctx, g.ID, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	var rub, ch int
-	switch t {
-	case domain.ActionJoin:
-		if active {
-			return nil, ErrAlreadyInGame
-		}
-		rub, ch = g.BuyInRub, g.BuyInChips
-	case domain.ActionRebuy:
-		if !active {
-			return nil, ErrNotInGame
-		}
-		rub, ch = g.RebuyRub, g.RebuyChips
-	case domain.ActionCashOut:
-		if !active {
-			return nil, ErrNotInGame
-		}
-		r, ok := g.ChipsToRub(chips)
-		if chips < 0 || !ok {
-			return nil, ErrInvalidChipsAmount
-		}
-		rub, ch = r, chips
-	default:
-		return nil, ErrNotFound
-	}
-
-	now := time.Now()
-	if g.DealerTgID == userID {
-		res := &RequestResult{Applied: true, Action: &domain.PendingAction{
-			GameID: g.ID, ActionType: t, RequesterTgID: userID, TargetTgID: userID,
-			Payload: map[string]any{"chips": ch, "rub": rub}, Status: domain.PendingStatusConfirmed,
-			ChatID: g.ChatID, CreatedAt: now, ResolvedAt: &now, ResolvedByTgID: &userID,
-		}}
-		err := s.tx.InTx(ctx, func(ctx context.Context) error {
-			var err error
-			res.Cancelled, err = s.apply(ctx, g, t, userID, ch, userID)
-			return err
-		})
+	var (
+		res          *RequestResult
+		createFailed bool
+	)
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := s.lockGame(ctx, g)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return res, nil
-	}
+		if err := requireActive(cur); err != nil {
+			return err
+		}
 
-	if _, err := s.pending.GetPending(ctx, g.ID, userID, t); err == nil {
-		return nil, ErrPendingExists
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
+		active, err := s.IsActivePlayer(ctx, cur.ID, userID)
+		if err != nil {
+			return err
+		}
 
-	pa := &domain.PendingAction{
-		GameID: g.ID, ActionType: t, RequesterTgID: userID, TargetTgID: userID,
-		Payload: map[string]any{}, Status: domain.PendingStatusPending, ChatID: g.ChatID, CreatedAt: now,
-	}
-	if t == domain.ActionCashOut {
-		pa.Payload["chips"] = chips
-	}
-	id, err := s.pending.Create(ctx, pa)
+		var rub, ch int
+		switch t {
+		case domain.ActionJoin:
+			if active {
+				return ErrAlreadyInGame
+			}
+			rub, ch = cur.BuyInRub, cur.BuyInChips
+		case domain.ActionRebuy:
+			if !active {
+				return ErrNotInGame
+			}
+			rub, ch = cur.RebuyRub, cur.RebuyChips
+		case domain.ActionCashOut:
+			if !active {
+				return ErrNotInGame
+			}
+			r, ok := cur.ChipsToRub(chips)
+			if chips < 0 || !ok {
+				return ErrInvalidChipsAmount
+			}
+			rub, ch = r, chips
+		default:
+			return ErrNotFound
+		}
+
+		now := time.Now()
+		if cur.DealerTgID == userID {
+			res = &RequestResult{Applied: true, Action: &domain.PendingAction{
+				GameID: cur.ID, ActionType: t, RequesterTgID: userID, TargetTgID: userID,
+				Payload: map[string]any{"chips": ch, "rub": rub}, Status: domain.PendingStatusConfirmed,
+				ChatID: cur.ChatID, CreatedAt: now, ResolvedAt: &now, ResolvedByTgID: &userID,
+			}}
+			res.Cancelled, err = s.apply(ctx, cur, t, userID, ch, userID)
+			return err
+		}
+
+		if _, err := s.pending.GetPending(ctx, cur.ID, userID, t); err == nil {
+			return ErrPendingExists
+		} else if !errors.Is(err, infrapg.ErrNoRows) {
+			return err
+		}
+
+		pa := &domain.PendingAction{
+			GameID: cur.ID, ActionType: t, RequesterTgID: userID, TargetTgID: userID,
+			Payload: map[string]any{}, Status: domain.PendingStatusPending, ChatID: cur.ChatID, CreatedAt: now,
+		}
+		if t == domain.ActionCashOut {
+			pa.Payload["chips"] = chips
+		}
+		id, err := s.pending.Create(ctx, pa)
+		if err != nil {
+			createFailed = true
+			return err
+		}
+		pa.ID = id
+		res = &RequestResult{Action: pa}
+		return nil
+	})
 	if err != nil {
 		// Уникальный индекс pending_one_per_target ловит гонку двух одинаковых запросов.
-		if _, gErr := s.pending.GetPending(ctx, g.ID, userID, t); gErr == nil {
-			return nil, ErrPendingExists
+		if createFailed {
+			if _, gErr := s.pending.GetPending(ctx, g.ID, userID, t); gErr == nil {
+				return nil, ErrPendingExists
+			}
 		}
 		return nil, err
 	}
-	pa.ID = id
-	return &RequestResult{Action: pa}, nil
+	if res.Applied {
+		s.syncSheetAsync(g.ID)
+	}
+	return res, nil
 }
 
 // RequestAmount — сумма и фишки запроса (для текстов сообщений).
@@ -193,15 +244,15 @@ func PayloadInt(p map[string]any, key string) (int, bool) {
 	}
 }
 
-// apply записывает действие в ledger (внутри транзакции вызывающего).
+// apply записывает действие в ledger (внутри транзакции вызывающего, игра заблокирована).
 func (s *GameService) apply(ctx context.Context, g *domain.Game, t domain.ActionType, target int64, chips int, by int64) ([]domain.PendingAction, error) {
 	switch t {
 	case domain.ActionJoin:
-		return nil, s.BuyIn(ctx, g, target, by)
+		return nil, s.recordBuyIn(ctx, g, target, by)
 	case domain.ActionRebuy:
-		return nil, s.Rebuy(ctx, g, target, by)
+		return nil, s.recordRebuy(ctx, g, target, by)
 	case domain.ActionCashOut:
-		return s.CashOut(ctx, g, target, chips, by)
+		return s.recordCashOut(ctx, g, target, chips, by)
 	}
 	return nil, ErrNotFound
 }
@@ -212,7 +263,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 	res := &ResolveResult{}
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
 		pa, err := s.pending.GetByID(ctx, paID)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
@@ -220,7 +271,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 		}
 		res.Action = pa
 
-		g, err := s.GameByID(ctx, pa.GameID)
+		g, err := s.lockGame(ctx, &domain.Game{ID: pa.GameID})
 		if err != nil {
 			return err
 		}
@@ -238,7 +289,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 			status = domain.PendingStatusConfirmed
 		}
 		resolved, err := s.pending.Resolve(ctx, paID, status, dealerID)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return ErrAlreadyResolved
 		}
 		if err != nil {
@@ -278,13 +329,16 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 		}
 		return nil, err
 	}
+	if approve {
+		s.syncSheetAsync(res.Game.ID)
+	}
 	return res, nil
 }
 
 // CancelRequest — игрок отзывает свой запрос.
 func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID int64) (*domain.PendingAction, error) {
 	pa, err := s.pending.GetByID(ctx, paID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && pa.GameID != gameID) {
+	if errors.Is(err, infrapg.ErrNoRows) || (err == nil && pa.GameID != gameID) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -294,7 +348,7 @@ func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID in
 		return nil, ErrNotRequester
 	}
 	cancelled, err := s.pending.CancelOne(ctx, paID, userID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return pa, ErrAlreadyResolved
 	}
 	return cancelled, err
@@ -303,14 +357,14 @@ func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID in
 // cancelPendingOf отменяет висящий запрос игрока данного типа (дилер сделал действие сам).
 func (s *GameService) cancelPendingOf(ctx context.Context, gameID, target int64, t domain.ActionType, by int64) ([]domain.PendingAction, error) {
 	pa, err := s.pending.GetPending(ctx, gameID, target, t)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	c, err := s.pending.CancelOne(ctx, pa.ID, by)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -321,160 +375,207 @@ func (s *GameService) cancelPendingOf(ctx context.Context, gameID, target int64,
 
 // DealerBuyIn — дилер сажает игрока за стол без запроса.
 func (s *GameService) DealerBuyIn(ctx context.Context, g *domain.Game, dealerID, target int64) ([]domain.PendingAction, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
-	}
 	var cancelled []domain.PendingAction
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		active, err := s.IsActivePlayer(ctx, g.ID, target)
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		active, err := s.IsActivePlayer(ctx, cur.ID, target)
 		if err != nil {
 			return err
 		}
 		if active {
 			return ErrAlreadyInGame
 		}
-		if err := s.BuyIn(ctx, g, target, dealerID); err != nil {
+		if err := s.recordBuyIn(ctx, cur, target, dealerID); err != nil {
 			return err
 		}
-		cancelled, err = s.cancelPendingOf(ctx, g.ID, target, domain.ActionJoin, dealerID)
+		cancelled, err = s.cancelPendingOf(ctx, cur.ID, target, domain.ActionJoin, dealerID)
 		return err
 	})
-	return cancelled, err
+	if err != nil {
+		return nil, err
+	}
+	s.syncSheetAsync(g.ID)
+	return cancelled, nil
 }
 
 // DealerRebuy — дилер записывает rebuy игроку без запроса.
 func (s *GameService) DealerRebuy(ctx context.Context, g *domain.Game, dealerID, target int64) ([]domain.PendingAction, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
-	}
 	var cancelled []domain.PendingAction
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		active, err := s.IsActivePlayer(ctx, g.ID, target)
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		active, err := s.IsActivePlayer(ctx, cur.ID, target)
 		if err != nil {
 			return err
 		}
 		if !active {
 			return ErrNotInGame
 		}
-		if err := s.Rebuy(ctx, g, target, dealerID); err != nil {
+		if err := s.recordRebuy(ctx, cur, target, dealerID); err != nil {
 			return err
 		}
-		cancelled, err = s.cancelPendingOf(ctx, g.ID, target, domain.ActionRebuy, dealerID)
+		cancelled, err = s.cancelPendingOf(ctx, cur.ID, target, domain.ActionRebuy, dealerID)
 		return err
 	})
-	return cancelled, err
+	if err != nil {
+		return nil, err
+	}
+	s.syncSheetAsync(g.ID)
+	return cancelled, nil
 }
 
 // DealerCashOut — дилер выводит игрока из-за стола.
 func (s *GameService) DealerCashOut(ctx context.Context, g *domain.Game, dealerID, target int64, chips int) ([]domain.PendingAction, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
-	}
-	if _, ok := g.ChipsToRub(chips); chips < 0 || !ok {
-		return nil, ErrInvalidChipsAmount
-	}
 	var cancelled []domain.PendingAction
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		active, err := s.IsActivePlayer(ctx, g.ID, target)
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		if _, ok := cur.ChipsToRub(chips); chips < 0 || !ok {
+			return ErrInvalidChipsAmount
+		}
+		active, err := s.IsActivePlayer(ctx, cur.ID, target)
 		if err != nil {
 			return err
 		}
 		if !active {
 			return ErrNotInGame
 		}
-		cancelled, err = s.CashOut(ctx, g, target, chips, dealerID)
+		cancelled, err = s.recordCashOut(ctx, cur, target, chips, dealerID)
 		return err
 	})
-	return cancelled, err
+	if err != nil {
+		return nil, err
+	}
+	s.syncSheetAsync(g.ID)
+	return cancelled, nil
 }
 
 // DealerUndo — дилер отменяет последние n записей.
 func (s *GameService) DealerUndo(ctx context.Context, g *domain.Game, dealerID int64, n int) ([]domain.LedgerEntry, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
+	if n < 1 {
+		n = 1
 	}
 	var voided []domain.LedgerEntry
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		var err error
-		voided, err = s.UndoLast(ctx, g.ID, n)
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		voided, err = s.UndoLast(ctx, cur.ID, n)
 		return err
 	})
-	return voided, err
+	if err != nil {
+		return nil, err
+	}
+	if len(voided) > 0 {
+		s.syncSheetAsync(g.ID)
+	}
+	return voided, nil
 }
 
 // DealerTransfer передаёт роль дилера активному игроку.
 func (s *GameService) DealerTransfer(ctx context.Context, g *domain.Game, dealerID, target int64) error {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return err
-	}
-	active, err := s.IsActivePlayer(ctx, g.ID, target)
-	if err != nil {
-		return err
-	}
-	if !active {
-		return ErrNotInGame
-	}
-	return s.games.UpdateDealer(ctx, g.ID, target)
+	return s.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		active, err := s.IsActivePlayer(ctx, cur.ID, target)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return ErrNotInGame
+		}
+		if err := s.games.UpdateDealer(ctx, cur.ID, target); err != nil {
+			return notActiveErr(err)
+		}
+		g.DealerTgID = target
+		return nil
+	})
 }
 
 // EndGame завершает игру. Пустая игра (без buy-in) отменяется. Без force расхождение
 // банка возвращает *BankMismatchError, активные игроки — *ActiveParticipantsError.
+//
+// Проверки, расчёт и запись итогов идут в одной транзакции под блокировкой игры (ТЗ §6):
+// между проверкой «все вышли, банк сошёлся» и записью итогов в ledger ничего не вклинится.
 func (s *GameService) EndGame(ctx context.Context, g *domain.Game, dealerID int64, force bool) (*EndResult, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
-	}
-
-	all, err := s.participants.ListByGame(ctx, g.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(all) == 0 {
-		cancelled, err := s.CancelGame(ctx, g, dealerID)
+	res := &EndResult{}
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := s.lockDealer(ctx, g, dealerID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return &EndResult{Cancelled: true, CancelledPending: cancelled}, nil
-	}
 
-	var activeIDs []int64
-	for _, p := range all {
-		if p.IsActive {
-			activeIDs = append(activeIDs, p.PlayerTgID)
+		all, err := s.participants.ListByGame(ctx, cur.ID)
+		if err != nil {
+			return err
 		}
-	}
-	if len(activeIDs) > 0 {
-		return nil, &ActiveParticipantsError{PlayerIDs: activeIDs}
-	}
+		if len(all) == 0 {
+			res.Cancelled = true
+			res.CancelledPending, err = s.cancelLocked(ctx, cur.ID)
+			return err
+		}
 
-	bank, err := s.ledger.GetBank(ctx, g.ID)
+		var activeIDs []int64
+		for _, p := range all {
+			if p.IsActive {
+				activeIDs = append(activeIDs, p.PlayerTgID)
+			}
+		}
+		if len(activeIDs) > 0 {
+			return &ActiveParticipantsError{PlayerIDs: activeIDs}
+		}
+
+		bank, err := s.ledger.GetBank(ctx, cur.ID)
+		if err != nil {
+			return err
+		}
+		if bank != 0 && !force {
+			return &BankMismatchError{BankRub: bank}
+		}
+		res.BankRub = bank
+
+		if res.Settlements, err = s.finish(ctx, cur.ID, bank); err != nil {
+			return err
+		}
+		res.CancelledPending, err = s.pending.CancelByGame(ctx, cur.ID)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	if bank != 0 && !force {
-		return nil, &BankMismatchError{BankRub: bank}
+	if res.Cancelled {
+		return res, nil
 	}
-
-	settlements, err := s.Finish(ctx, g.ID, bank)
-	if err != nil {
-		return nil, err
-	}
-	cancelled, err := s.pending.CancelByGame(ctx, g.ID)
-	if err != nil {
-		s.log.Warn("cancel pending after finish", zap.Error(err), zap.Int64("game_id", g.ID))
-	}
-	// Finish возвращает переводы без ID и флагов — берём записанные.
+	s.syncSheetAsync(g.ID)
+	// finish возвращает переводы без ID и флагов — берём записанные.
 	if stored, lErr := s.settlements.ListByGame(ctx, g.ID); lErr == nil {
-		settlements = stored
+		res.Settlements = stored
 	}
-	return &EndResult{BankRub: bank, Settlements: settlements, CancelledPending: cancelled}, nil
+	return res, nil
 }
 
 // CancelGame отменяет игру дилером; висящие запросы закрываются.
 func (s *GameService) CancelGame(ctx context.Context, g *domain.Game, dealerID int64) ([]domain.PendingAction, error) {
-	if err := requireActiveDealer(g, dealerID); err != nil {
-		return nil, err
-	}
-	return s.cancelGame(ctx, g)
+	var cancelled []domain.PendingAction
+	err := s.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := s.lockDealer(ctx, g, dealerID)
+		if err != nil {
+			return err
+		}
+		cancelled, err = s.cancelLocked(ctx, cur.ID)
+		return err
+	})
+	return cancelled, err
 }
 
 // AdminIdleTimeout — сколько дилер должен бездействовать, чтобы админ чата мог отменить игру (ТЗ §8.1).
@@ -510,21 +611,37 @@ func (s *GameService) AdminCancelGame(ctx context.Context, g *domain.Game, now t
 	if now.Sub(last) < AdminIdleTimeout {
 		return nil, last, ErrDealerNotIdle
 	}
-	cancelled, err := s.cancelGame(ctx, g)
+
+	// Повторная проверка под блокировкой: пока админ жал кнопку, дилер мог успеть
+	// что-то сделать, передать роль или завершить игру.
+	var cancelled []domain.PendingAction
+	err = s.tx.InTx(ctx, func(ctx context.Context) error {
+		cur, err := s.lockGame(ctx, g)
+		if err != nil {
+			return err
+		}
+		if err := requireActive(cur); err != nil {
+			return err
+		}
+		if last, err = s.DealerLastActivity(ctx, cur); err != nil {
+			return err
+		}
+		if now.Sub(last) < AdminIdleTimeout {
+			return ErrDealerNotIdle
+		}
+		cancelled, err = s.cancelLocked(ctx, cur.ID)
+		return err
+	})
 	return cancelled, last, err
 }
 
-func (s *GameService) cancelGame(ctx context.Context, g *domain.Game) ([]domain.PendingAction, error) {
-	var cancelled []domain.PendingAction
-	err := s.tx.InTx(ctx, func(ctx context.Context) error {
-		if err := s.games.Cancel(ctx, g.ID); err != nil {
-			return err
-		}
-		var err error
-		cancelled, err = s.pending.CancelByGame(ctx, g.ID)
-		return err
-	})
-	return cancelled, err
+// cancelLocked отменяет игру и закрывает её висящие запросы (внутри транзакции
+// вызывающего, игра заблокирована).
+func (s *GameService) cancelLocked(ctx context.Context, gameID int64) ([]domain.PendingAction, error) {
+	if err := s.games.Cancel(ctx, gameID); err != nil {
+		return nil, notActiveErr(err)
+	}
+	return s.pending.CancelByGame(ctx, gameID)
 }
 
 // CreateGameIn начинает игру в группе; при dealerBuyIn сразу записывает buy-in дилеру.

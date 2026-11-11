@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
 )
@@ -12,12 +10,11 @@ import (
 // PlayerService provides player lookup and registration operations.
 type PlayerService struct {
 	players interfaces.PlayerRepository
-	log     *zap.Logger
 }
 
 // NewPlayerService creates a new PlayerService backed by the given repository.
-func NewPlayerService(players interfaces.PlayerRepository, log *zap.Logger) *PlayerService {
-	return &PlayerService{players: players, log: log}
+func NewPlayerService(players interfaces.PlayerRepository) *PlayerService {
+	return &PlayerService{players: players}
 }
 
 // Upsert registers or updates a player from incoming Telegram message metadata.

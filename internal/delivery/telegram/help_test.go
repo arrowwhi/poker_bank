@@ -8,7 +8,7 @@ import (
 )
 
 func testHandler(username, shortName string) *Handler {
-	h := NewHandler(nil, nil, nil, nil, nil, nil, nil)
+	h := NewHandler(nil, nil, nil, nil, nil, nil)
 	h.SetWebAppShortName(shortName)
 	if username != "" {
 		h.botUsername = func() string { return username }

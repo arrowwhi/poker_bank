@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,13 +12,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/repository/postgres"
 	"poker_bank/internal/repository/postgres/pgtest"
 	"poker_bank/internal/service"
 )
+
+var errTelegramUnavailable = errors.New("telegram unavailable")
 
 // stubNotifier: API в этих тестах ничего не пишет в чат и не ходит в Telegram.
 type stubNotifier struct{}
@@ -30,21 +32,24 @@ func (stubNotifier) Announce(context.Context, int64, string)                    
 func (stubNotifier) GameCreated(context.Context, *domain.Game)                           {}
 func (stubNotifier) GameFinished(context.Context, *domain.Game, *service.EndResult)      {}
 func (stubNotifier) SettlementsChanged(context.Context, *domain.Game)                    {}
-func (stubNotifier) IsChatMember(context.Context, int64, int64) (bool, error)            { return false, nil }
-func (stubNotifier) PlayerName(context.Context, int64) string                            { return "" }
+
+// IsChatMember: Telegram недоступен — доступ решают известные боту участники.
+func (stubNotifier) IsChatMember(context.Context, int64, int64) (bool, error) {
+	return false, errTelegramUnavailable
+}
+func (stubNotifier) PlayerName(context.Context, int64) string { return "" }
 
 // apiOnPostgres собирает /api поверх настоящих репозиториев (нужен TEST_DATABASE_URL).
 func apiOnPostgres(t *testing.T) (http.Handler, func(chatID, playerID int64, netRub int) int64) {
 	t.Helper()
 	pool := pgtest.Pool(t)
-	log := zap.NewNop()
 
 	games := service.NewGameService(
 		postgres.NewGameRepo(pool), postgres.NewLedgerRepo(pool), postgres.NewParticipantRepo(pool),
 		postgres.NewGameResultRepo(pool), postgres.NewSettlementRepo(pool), postgres.NewPendingActionRepo(pool),
-		postgres.NewChatRepo(pool), postgres.NewTxManager(pool), nil, log,
+		postgres.NewChatRepo(pool), postgres.NewTxManager(pool), nil,
 	)
-	a := &api{games: games, players: service.NewPlayerService(postgres.NewPlayerRepo(pool), log), notifier: stubNotifier{}, log: log}
+	a := &api{games: games, players: service.NewPlayerService(postgres.NewPlayerRepo(pool)), notifier: stubNotifier{}}
 
 	r := chi.NewRouter()
 	r.Route("/api", func(r chi.Router) {
