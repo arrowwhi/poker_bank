@@ -12,10 +12,10 @@ import (
 
 	httpserver "github.com/arrowwhi/infrastructure/http/server"
 	"github.com/arrowwhi/infrastructure/observability/health"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 	"github.com/arrowwhi/infrastructure/observability/metrics"
 	"github.com/arrowwhi/infrastructure/observability/tracing"
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/service"
@@ -27,7 +27,6 @@ type Deps struct {
 	Players *service.PlayerService
 	// Notifier отражает действия из Mini App в чате игры.
 	Notifier Notifier
-	Log      *zap.Logger
 	Health   *health.Registry
 	// WebAssets — собранный Mini App; nil — только API.
 	WebAssets fs.FS
@@ -68,10 +67,10 @@ func New(d Deps) (*httpserver.Server, error) {
 		r.Method(http.MethodPost, d.WebhookPath, d.TelegramWebhook)
 	}
 
-	a := &api{games: d.Games, players: d.Players, notifier: d.Notifier, log: d.Log}
+	a := &api{games: d.Games, players: d.Players, notifier: d.Notifier}
 
 	r.Route("/api", func(r chi.Router) {
-		r.Use(TelegramAuth(d.BotToken, upsertPlayer(d.Players, d.Log)))
+		r.Use(TelegramAuth(d.BotToken, upsertPlayer(d.Players)))
 		a.routes(r)
 	})
 
@@ -83,7 +82,7 @@ func New(d Deps) (*httpserver.Server, error) {
 }
 
 // upsertPlayer обновляет ник и имя пользователя при каждом заходе в Mini App.
-func upsertPlayer(players *service.PlayerService, log *zap.Logger) func(context.Context, Identity) {
+func upsertPlayer(players *service.PlayerService) func(context.Context, Identity) {
 	return func(ctx context.Context, id Identity) {
 		err := players.Upsert(ctx, &domain.Player{
 			TelegramUserID: id.TelegramID,
@@ -91,7 +90,7 @@ func upsertPlayer(players *service.PlayerService, log *zap.Logger) func(context.
 			DisplayName:    strings.TrimSpace(id.FirstName + " " + id.LastName),
 		})
 		if err != nil {
-			log.Warn("upsert player from mini app", zap.Error(err), zap.Int64("tg_id", id.TelegramID))
+			logger.Warn(ctx).Err(err).Int64("tg_id", id.TelegramID).Msg("upsert player from mini app")
 		}
 	}
 }

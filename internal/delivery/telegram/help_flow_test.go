@@ -13,7 +13,6 @@ import (
 	"time"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/pkg/tgforum"
@@ -120,8 +119,7 @@ func TestStartAndHelpFlow(t *testing.T) {
 		t.Fatalf("new bot: %v", err)
 	}
 
-	log := zap.NewNop()
-	h := NewHandler(tgforum.NewTracker(), nil, service.NewPlayerService(stubPlayers{}, log), nil, nil, nil, log)
+	h := NewHandler(tgforum.NewTracker(), nil, service.NewPlayerService(stubPlayers{}), nil, nil, nil)
 	h.SetWebAppShortName("poker_bank")
 	h.Register(bot)
 

@@ -6,8 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"go.uber.org/zap"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -66,7 +65,7 @@ func (r memGames) GetByID(_ context.Context, id int64) (*domain.Game, error) {
 			return &g, nil
 		}
 	}
-	return nil, pgx.ErrNoRows
+	return nil, infrapg.ErrNoRows
 }
 
 // LockByID в памяти — просто чтение: тесты однопоточные, блокировка нужна только Postgres.
@@ -80,7 +79,7 @@ func (r memGames) GetActiveByChat(_ context.Context, chatID int64) (*domain.Game
 			return &g, nil
 		}
 	}
-	return nil, pgx.ErrNoRows
+	return nil, infrapg.ErrNoRows
 }
 
 func (r memGames) ListActiveByPlayer(_ context.Context, tgID int64) ([]domain.Game, error) {
@@ -108,7 +107,7 @@ func (r memGames) setStatus(id int64, st domain.GameStatus) error {
 			return nil
 		}
 	}
-	return pgx.ErrNoRows
+	return infrapg.ErrNoRows
 }
 
 func (r memGames) UpdateDealer(_ context.Context, id, dealerTgID int64) error {
@@ -118,7 +117,7 @@ func (r memGames) UpdateDealer(_ context.Context, id, dealerTgID int64) error {
 			return nil
 		}
 	}
-	return pgx.ErrNoRows
+	return infrapg.ErrNoRows
 }
 
 func (r memGames) Cancel(_ context.Context, id int64) error {
@@ -207,7 +206,7 @@ func (r memParticipants) GetByPlayer(_ context.Context, gameID, tgID int64) (*do
 		p := r.db.participants[i]
 		return &p, nil
 	}
-	return nil, pgx.ErrNoRows
+	return nil, infrapg.ErrNoRows
 }
 
 func (r memParticipants) list(gameID int64, onlyActive bool) []domain.Participant {
@@ -250,7 +249,7 @@ type memPending struct {
 }
 
 func (memPending) GetPending(context.Context, int64, int64, domain.ActionType) (*domain.PendingAction, error) {
-	return nil, pgx.ErrNoRows
+	return nil, infrapg.ErrNoRows
 }
 func (memPending) CancelByPlayer(context.Context, int64, int64) ([]domain.PendingAction, error) {
 	return nil, nil
@@ -286,7 +285,7 @@ func newFlowService() (*GameService, *memDB) {
 	return NewGameService(
 		memGames{db: db}, memLedger{db}, memParticipants{db},
 		nil, memSettlements{}, memPending{db: db}, nil, db,
-		NewNoopSheetsExporter(), zap.NewNop(),
+		NewNoopSheetsExporter(),
 	), db
 }
 

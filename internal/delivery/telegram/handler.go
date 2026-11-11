@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/interfaces"
 	"poker_bank/internal/pkg/tgforum"
@@ -21,7 +20,6 @@ type Handler struct {
 	pending   *service.PendingService
 	fsm       interfaces.FSMStateRepository
 	chatTopic interfaces.ChatTopicRepository
-	log       *zap.Logger
 
 	// lastHintAt throttles the "wrong topic" hint to at most once per hour per chat.
 	hintMu     sync.Mutex
@@ -52,7 +50,6 @@ func NewHandler(
 	pending *service.PendingService,
 	fsm interfaces.FSMStateRepository,
 	chatTopic interfaces.ChatTopicRepository,
-	log *zap.Logger,
 ) *Handler {
 	return &Handler{
 		forum:       forum,
@@ -61,7 +58,6 @@ func NewHandler(
 		pending:     pending,
 		fsm:         fsm,
 		chatTopic:   chatTopic,
-		log:         log,
 		lastHintAt:  make(map[int64]time.Time),
 		memberCache: make(map[[2]int64]memberCacheEntry),
 		usedButtons: make(map[[2]int64]time.Time),

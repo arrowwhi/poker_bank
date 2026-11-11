@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
-	"github.com/jackc/pgx/v5"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -154,7 +153,7 @@ func (r *GameRepo) ListActiveByPlayer(ctx context.Context, tgID int64) ([]domain
 }
 
 // UpdateDealer sets a new dealer for the given active game. Если игра уже не активна,
-// возвращает ошибку, оборачивающую pgx.ErrNoRows.
+// возвращает ошибку, оборачивающую infrapg.ErrNoRows.
 func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error {
 	tag, err := r.db.Exec(ctx,
 		`UPDATE games SET dealer_tg_id = $1 WHERE id = $2 AND status = 'active'`,
@@ -164,13 +163,13 @@ func (r *GameRepo) UpdateDealer(ctx context.Context, id int64, dealerTgID int64)
 		return fmt.Errorf("update dealer: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("update dealer: game %d is not active: %w", id, pgx.ErrNoRows)
+		return fmt.Errorf("update dealer: game %d is not active: %w", id, infrapg.ErrNoRows)
 	}
 	return nil
 }
 
 // Finish executes the end-game transaction: updates status, writes game_results and settlements.
-// Статус меняется только у активной игры; иначе — ошибка, оборачивающая pgx.ErrNoRows,
+// Статус меняется только у активной игры; иначе — ошибка, оборачивающая infrapg.ErrNoRows,
 // и ничего не записывается.
 func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParams) error {
 	return r.db.InTx(ctx, func(ctx context.Context) error {
@@ -182,7 +181,7 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 			return fmt.Errorf("finish game: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("finish game: game %d is not active: %w", params.GameID, pgx.ErrNoRows)
+			return fmt.Errorf("finish game: game %d is not active: %w", params.GameID, infrapg.ErrNoRows)
 		}
 
 		for _, res := range params.Results {
@@ -213,7 +212,7 @@ func (r *GameRepo) Finish(ctx context.Context, params interfaces.FinishGameParam
 }
 
 // Cancel marks an active game as cancelled and records the end time. Если игра уже
-// не активна, возвращает ошибку, оборачивающую pgx.ErrNoRows.
+// не активна, возвращает ошибку, оборачивающую infrapg.ErrNoRows.
 func (r *GameRepo) Cancel(ctx context.Context, id int64) error {
 	tag, err := r.db.Exec(ctx,
 		`UPDATE games SET status = 'cancelled', ended_at = now() WHERE id = $1 AND status = 'active'`,
@@ -223,7 +222,7 @@ func (r *GameRepo) Cancel(ctx context.Context, id int64) error {
 		return fmt.Errorf("cancel game: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("cancel game: game %d is not active: %w", id, pgx.ErrNoRows)
+		return fmt.Errorf("cancel game: game %d is not active: %w", id, infrapg.ErrNoRows)
 	}
 	return nil
 }

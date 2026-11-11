@@ -2,11 +2,12 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/arrowwhi/infrastructure/observability/logger"
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/pkg/tgforum"
@@ -41,7 +42,7 @@ func (h *Handler) editInChat(ctx context.Context, chatID int64, messageID int64,
 		ChatID: chatID, MessageID: int(messageID), Text: text, ReplyMarkup: markup,
 	})
 	if err != nil && !tg.IsMessageNotModified(err) {
-		h.log.Warn("edit chat message", zap.Error(err), zap.Int64("chat_id", chatID), zap.Int64("message_id", messageID))
+		logger.Warn(ctx).Err(err).Int64("chat_id", chatID).Int64("message_id", messageID).Msg("edit chat message")
 	}
 }
 
@@ -68,11 +69,11 @@ func (h *Handler) requestText(ctx context.Context, g *domain.Game, pa *domain.Pe
 func (h *Handler) RequestCreated(ctx context.Context, g *domain.Game, pa *domain.PendingAction) {
 	m, err := h.sendToChat(ctx, g.ChatID, h.requestText(ctx, g, pa), pendingMarkup(pa.ID))
 	if err != nil {
-		h.log.Warn("send pending request", zap.Error(err), zap.Int64("pending_id", pa.ID))
+		logger.Warn(ctx).Err(err).Int64("pending_id", pa.ID).Msg("send pending request")
 		return
 	}
 	if err := h.game.SetPendingMessageID(ctx, pa.ID, int64(m.MessageID)); err != nil {
-		h.log.Warn("save pending message id", zap.Error(err), zap.Int64("pending_id", pa.ID))
+		logger.Warn(ctx).Err(err).Int64("pending_id", pa.ID).Msg("save pending message id")
 	}
 }
 
@@ -107,7 +108,7 @@ func (h *Handler) resolvedText(ctx context.Context, pa *domain.PendingAction) st
 // Announce пишет в чат игры короткое сообщение о действии из Mini App.
 func (h *Handler) Announce(ctx context.Context, chatID int64, text string) {
 	if _, err := h.sendToChat(ctx, chatID, text, nil); err != nil {
-		h.log.Warn("announce", zap.Error(err), zap.Int64("chat_id", chatID))
+		logger.Warn(ctx).Err(err).Int64("chat_id", chatID).Msg("announce")
 	}
 }
 
@@ -120,7 +121,7 @@ func (h *Handler) GameFinished(ctx context.Context, g *domain.Game, res *service
 	}
 	m, err := h.sendToChat(ctx, g.ChatID, h.buildEndGameMessage(ctx, g.ID, res.BankRub, res.Settlements), h.settleMarkup(g.ID, res.Settlements))
 	if err != nil {
-		h.log.Warn("send end game message", zap.Error(err), zap.Int64("game_id", g.ID))
+		logger.Warn(ctx).Err(err).Int64("game_id", g.ID).Msg("send end game message")
 		return
 	}
 	h.rememberSettleMessage(ctx, g.ID, m.MessageID)
@@ -128,7 +129,7 @@ func (h *Handler) GameFinished(ctx context.Context, g *domain.Game, res *service
 
 func (h *Handler) rememberSettleMessage(ctx context.Context, gameID int64, messageID int) {
 	if err := h.game.SetSettleMessageID(ctx, gameID, int64(messageID)); err != nil {
-		h.log.Warn("save settle message id", zap.Error(err), zap.Int64("game_id", gameID))
+		logger.Warn(ctx).Err(err).Int64("game_id", gameID).Msg("save settle message id")
 	}
 }
 
@@ -140,7 +141,7 @@ func (h *Handler) SettlementsChanged(ctx context.Context, g *domain.Game) {
 	}
 	settlements, err := h.game.ListSettlements(ctx, g.ID)
 	if err != nil {
-		h.log.Warn("list settlements", zap.Error(err), zap.Int64("game_id", g.ID))
+		logger.Warn(ctx).Err(err).Int64("game_id", g.ID).Msg("list settlements")
 		return
 	}
 	h.editInChat(ctx, g.ChatID, *msgID, h.buildEndGameMessage(ctx, g.ID, g.BankDeltaRub, settlements), h.settleMarkup(g.ID, settlements))
@@ -154,7 +155,7 @@ func (h *Handler) RequestApplied(ctx context.Context, g *domain.Game, pa *domain
 // GameCreated публикует в группе сводку игры, начатой из Mini App.
 func (h *Handler) GameCreated(ctx context.Context, g *domain.Game) {
 	if _, err := h.sendToChat(ctx, g.ChatID, h.gameStartedText(g, h.name(ctx, g.DealerTgID)), h.gameStartedMarkup(g)); err != nil {
-		h.log.Warn("announce new game", zap.Error(err), zap.Int64("chat_id", g.ChatID))
+		logger.Warn(ctx).Err(err).Int64("chat_id", g.ChatID).Msg("announce new game")
 	}
 }
 
@@ -188,9 +189,12 @@ type memberCacheEntry struct {
 }
 
 // IsChatMember проверяет через Telegram, состоит ли пользователь в группе (с кешем).
+//
+// Ошибка означает «проверить не удалось» (нет клиента Bot API, бот не в группе, сеть),
+// а не «не участник».
 func (h *Handler) IsChatMember(ctx context.Context, chatID, userID int64) (bool, error) {
 	if h.api == nil {
-		return false, nil
+		return false, errNoBotAPI
 	}
 	key := [2]int64{chatID, userID}
 	h.memberMu.Lock()
@@ -202,15 +206,28 @@ func (h *Handler) IsChatMember(ctx context.Context, chatID, userID int64) (bool,
 
 	m, err := tgforum.GetChatMember(ctx, h.api, chatID, userID)
 	if err != nil {
-		// Бота нет в группе или группа не существует — доступа нет.
-		if tg.IsCode(err, 400) || tg.IsCode(err, 403) {
-			return false, nil
-		}
-		return false, err
+		// Бота нет в группе или группа не существует: проверить членство нельзя.
+		// Вызывающий решает по тому, что знает сам (см. delivery/http canSeeChat).
+		return false, fmt.Errorf("getChatMember %d/%d: %w", chatID, userID, err)
 	}
 
 	h.memberMu.Lock()
 	h.memberCache[key] = memberCacheEntry{at: time.Now(), ok: m.InChat()}
 	h.memberMu.Unlock()
 	return m.InChat(), nil
+}
+
+// errNoBotAPI — бот ещё не зарегистрирован (нет клиента Bot API), членство не проверить.
+var errNoBotAPI = errors.New("telegram bot api is not ready")
+
+// forgetMember убирает участника из известных членов группы и из кэша getChatMember:
+// он вышел или его удалили, и Mini App больше не должно пускать его в группу.
+func (h *Handler) forgetMember(chatID, userID int64) {
+	h.memberMu.Lock()
+	delete(h.memberCache, [2]int64{chatID, userID})
+	h.memberMu.Unlock()
+
+	if err := h.game.ForgetMember(context.Background(), chatID, userID); err != nil {
+		logger.Warn(context.Background()).Err(err).Int64("chat_id", chatID).Int64("tg_id", userID).Msg("forget chat member")
+	}
 }

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { User } from '../api';
 import { initials } from '../lib/format';
-import { FallbackHeader, useBackButton } from '../telegram/buttons';
+import { FallbackHeader, useBackButton, useMainButton } from '../telegram/buttons';
 
 export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   useEffect(() => { document.title = title; }, [title]);
@@ -289,7 +289,12 @@ export const useConfirm = () => useContext(ConfirmCtx);
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<(ConfirmOptions & { resolve: (v: boolean) => void }) | null>(null);
-  const confirm = useCallback((o: ConfirmOptions) => new Promise<boolean>((resolve) => setState({ ...o, resolve })), []);
+  // Новый вызов, пока открыт прежний диалог (двойной тап), закрывает прежний как «Отмена»:
+  // иначе его await висит вечно, а второе действие уходит поверх первого.
+  const confirm = useCallback((o: ConfirmOptions) => new Promise<boolean>((resolve) => setState((prev) => {
+    prev?.resolve(false);
+    return { ...o, resolve };
+  })), []);
   const close = (v: boolean) => { state?.resolve(v); setState(null); };
   return (
     <ConfirmCtx.Provider value={confirm}>
@@ -301,6 +306,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
 function ConfirmDialog({ o, onClose }: { o: ConfirmOptions; onClose: (v: boolean) => void }) {
   useBackButton(() => onClose(false));
+  // Нативная MainButton рисуется вне WebView и остаётся нажимаемой под модалкой — прячем её.
+  useMainButton({ text: '', hidden: true, onClick: () => {} });
   return (
     <>
       <div className="scrim dialog-scrim" onClick={() => onClose(false)} />

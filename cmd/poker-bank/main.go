@@ -2,36 +2,24 @@ package main
 
 import (
 	"context"
-	"log"
 
-	"go.uber.org/zap"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	"poker_bank/internal/app"
 	"poker_bank/internal/config"
 )
 
 func main() {
+	ctx := context.Background()
+
+	// Логгер инфраструктуры настраивает app.Run (telegram.NewApp → logger.Init по LOG_LEVEL).
+	// До этого ошибки конфигурации пишет его временный логгер.
 	cfg, err := config.Load(".env")
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(ctx).Err(err).Msg("load config")
 	}
 
-	logger, err := buildLogger(cfg.LogLevel)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer logger.Sync() //nolint:errcheck
-
-	if err := app.Run(context.Background(), cfg, logger); err != nil {
-		logger.Fatal("run app", zap.Error(err))
-	}
-}
-
-func buildLogger(level string) (*zap.Logger, error) {
-	switch level {
-	case "debug":
-		return zap.NewDevelopment()
-	default:
-		return zap.NewProduction()
+	if err := app.Run(ctx, cfg); err != nil {
+		logger.Fatal(ctx).Err(err).Msg("run app")
 	}
 }

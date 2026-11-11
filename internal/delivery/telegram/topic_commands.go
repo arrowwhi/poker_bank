@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	"poker_bank/internal/pkg/tgforum"
 )
@@ -27,7 +27,7 @@ func (h *Handler) handleSetTopic(c *Context) error {
 	}
 
 	if err := h.chatTopic.Set(context.Background(), chat.ID, topicID, c.Sender().ID); err != nil {
-		h.log.Error("set chat topic", zap.Error(err), zap.Int64("chat_id", chat.ID))
+		logger.Error(c).Err(err).Int64("chat_id", chat.ID).Msg("set chat topic")
 		return c.Reply("Внутренняя ошибка. Попробуй позже.")
 	}
 
@@ -47,7 +47,7 @@ func (h *Handler) handleUnsetTopic(c *Context) error {
 	}
 
 	if err := h.chatTopic.Delete(context.Background(), chat.ID); err != nil {
-		h.log.Error("delete chat topic", zap.Error(err), zap.Int64("chat_id", chat.ID))
+		logger.Error(c).Err(err).Int64("chat_id", chat.ID).Msg("delete chat topic")
 		return c.Reply("Внутренняя ошибка. Попробуй позже.")
 	}
 
@@ -58,7 +58,7 @@ func (h *Handler) handleUnsetTopic(c *Context) error {
 func (h *Handler) isChatAdmin(c *Context) bool {
 	member, err := tgforum.GetChatMember(c, c.API(), c.Chat().ID, c.Sender().ID)
 	if err != nil {
-		h.log.Warn("check chat admin", zap.Error(err), zap.Int64("chat_id", c.Chat().ID))
+		logger.Warn(c).Err(err).Int64("chat_id", c.Chat().ID).Msg("check chat admin")
 		return false
 	}
 	return member.IsAdmin()

@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
-	"github.com/jackc/pgx/v5"
 
 	"poker_bank/internal/domain"
 )
@@ -28,7 +27,7 @@ func (r *ChatTopicRepo) Get(ctx context.Context, chatID int64) (*domain.ChatTopi
 		SELECT chat_id, topic_id, set_by_tg_id, created_at, updated_at
 		FROM chat_topics WHERE chat_id = $1
 	`, chatID).Scan(&ct.ChatID, &ct.TopicID, &ct.SetByTgID, &ct.CreatedAt, &ct.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

@@ -83,10 +83,10 @@ func TestApplyBankDelta_NegativeDelta_ReducesCreditors(t *testing.T) {
 	}
 }
 
-func TestApplyBankDelta_RemainderGoesToLargestMagnitude(t *testing.T) {
+func TestApplyBankDelta_RemainderByLargestFraction(t *testing.T) {
 	// Debtors -10,-30,-70 (total X=110), creditor 100 (Y=100), delta=X-Y=10.
-	// Cuts: 10*10/110=0, 10*30/110=2, 10*70/110=6 -> distributed=8, remainder=2
-	// goes to the largest-magnitude debtor (-70).
+	// Exact shares: 0.91, 2.73, 6.36 -> floors 0,2,6 (distributed 8), remainder 2
+	// goes to the largest fractional parts: player 1 (.91) and player 2 (.73).
 	in := []domain.GameResult{
 		{PlayerTgID: 1, NetRub: -10},
 		{PlayerTgID: 2, NetRub: -30},
@@ -98,17 +98,31 @@ func TestApplyBankDelta_RemainderGoesToLargestMagnitude(t *testing.T) {
 	if sumNet(out) != 0 {
 		t.Fatalf("expected sum(NetRub) == 0, got %d", sumNet(out))
 	}
-	if got := findByTgID(out, 4).NetRub; got != 100 {
-		t.Errorf("creditor should be unchanged, got NetRub=%d", got)
+	want := map[int64]int{1: -9, 2: -27, 3: -64, 4: 100}
+	for id, w := range want {
+		if got := findByTgID(out, id).NetRub; got != w {
+			t.Errorf("player %d: NetRub = %d, want %d", id, got, w)
+		}
 	}
-	if got := findByTgID(out, 1).NetRub; got != -10 {
-		t.Errorf("expected -10 (zero cut), got %d", got)
+}
+
+// Ревью settle-1: при старом правиле «весь остаток крупнейшему» проигравший мог
+// превратиться в получателя денег. [-1,-1,-1,+1], delta = 2 давало [+1,-1,-1,+1].
+func TestApplyBankDelta_NobodyFlipsSide(t *testing.T) {
+	in := []domain.GameResult{
+		{PlayerTgID: 1, NetRub: -1},
+		{PlayerTgID: 2, NetRub: -1},
+		{PlayerTgID: 3, NetRub: -1},
+		{PlayerTgID: 4, NetRub: 1},
 	}
-	if got := findByTgID(out, 2).NetRub; got != -28 {
-		t.Errorf("expected -28 (cut 2), got %d", got)
+	out := ApplyBankDelta(in, 2)
+	if sumNet(out) != 0 {
+		t.Fatalf("sum = %d, want 0", sumNet(out))
 	}
-	if got := findByTgID(out, 3).NetRub; got != -62 {
-		t.Errorf("largest debtor should absorb remainder: expected -62 (cut 6 + remainder 2), got %d", got)
+	for _, r := range out[:3] {
+		if r.NetRub > 0 {
+			t.Fatalf("debtor %d became a creditor: %+v", r.PlayerTgID, out)
+		}
 	}
 }
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jackc/pgx/v5"
-	"go.uber.org/zap"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
@@ -22,7 +22,6 @@ type GameService struct {
 	chats        interfaces.ChatRepository
 	tx           interfaces.TxManager
 	exporter     interfaces.SheetsExporter
-	log          *zap.Logger
 }
 
 // NewGameService creates a GameService wired to the provided repository implementations.
@@ -36,7 +35,6 @@ func NewGameService(
 	chats interfaces.ChatRepository,
 	tx interfaces.TxManager,
 	exporter interfaces.SheetsExporter,
-	log *zap.Logger,
 ) *GameService {
 	return &GameService{
 		games:        games,
@@ -48,7 +46,6 @@ func NewGameService(
 		chats:        chats,
 		tx:           tx,
 		exporter:     exporter,
-		log:          log,
 	}
 }
 
@@ -67,7 +64,7 @@ func (s *GameService) NewGame(ctx context.Context, g *domain.Game) (int64, error
 func (s *GameService) createSheetAsync(gameID int64) {
 	go func() {
 		if err := s.exporter.CreateGameSheet(context.Background(), gameID); err != nil {
-			s.log.Error("создание листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
+			logger.Error(context.Background()).Int64("game_id", gameID).Err(err).Msg("создание листа Google Sheets")
 		}
 	}()
 }
@@ -76,7 +73,7 @@ func (s *GameService) createSheetAsync(gameID int64) {
 func (s *GameService) syncSheetAsync(gameID int64) {
 	go func() {
 		if err := s.exporter.SyncGame(context.Background(), gameID); err != nil {
-			s.log.Error("синхронизация листа Google Sheets", zap.Int64("game_id", gameID), zap.Error(err))
+			logger.Error(context.Background()).Int64("game_id", gameID).Err(err).Msg("синхронизация листа Google Sheets")
 		}
 	}()
 }
@@ -85,7 +82,7 @@ func (s *GameService) syncSheetAsync(gameID int64) {
 func (s *GameService) GetActiveGame(ctx context.Context, chatID int64) (*domain.Game, error) {
 	g, err := s.games.GetActiveByChat(ctx, chatID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return nil, ErrNoActiveGame
 		}
 		return nil, err

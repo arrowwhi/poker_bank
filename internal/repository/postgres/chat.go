@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
-	"github.com/jackc/pgx/v5"
 
 	"poker_bank/internal/domain"
 )
@@ -68,7 +67,7 @@ func (r *ChatRepo) Get(ctx context.Context, id int64) (*domain.Chat, error) {
 	err := r.db.QueryRow(ctx, `
 		SELECT id, title, type, created_at, updated_at FROM chats WHERE id = $1
 	`, id).Scan(&c.ID, &c.Title, &c.Type, &c.CreatedAt, &c.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

@@ -30,7 +30,7 @@ type GameRepository interface {
 	Number(ctx context.Context, g *domain.Game) (int, error)
 	SetSettleMessageID(ctx context.Context, id, messageID int64) error
 	GetSettleMessageID(ctx context.Context, id int64) (*int64, error)
-	// UpdateDealer, Finish и Cancel меняют только активную игру; иначе — ошибка с pgx.ErrNoRows.
+	// UpdateDealer, Finish и Cancel меняют только активную игру; иначе — ошибка с infrapg.ErrNoRows.
 	UpdateDealer(ctx context.Context, id int64, dealerTgID int64) error
 	Finish(ctx context.Context, params FinishGameParams) error
 	Cancel(ctx context.Context, id int64) error

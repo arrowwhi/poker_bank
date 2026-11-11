@@ -31,6 +31,8 @@ type Info struct {
 	ThreadID int
 	// MigrateToChatID — группа стала супергруппой с этим id.
 	MigrateToChatID int64
+	// LeftUserID — сервисное сообщение «участник вышел или удалён из группы».
+	LeftUserID int64
 }
 
 // ttl — сколько хранится запись, если обновление так и не дошло до Middleware
@@ -84,6 +86,9 @@ func (t *Tracker) forget(updateID int64) {
 
 // rawMessage — поля сообщения, которых нет в telegram.Message.
 type rawMessage struct {
+	LeftChatMember *struct {
+		ID int64 `json:"id"`
+	} `json:"left_chat_member"`
 	MessageThreadID int   `json:"message_thread_id"`
 	MigrateToChatID int64 `json:"migrate_to_chat_id"`
 	IsTopicMessage  bool  `json:"is_topic_message"`
@@ -137,6 +142,9 @@ func (t *Tracker) record(updates []rawUpdate) {
 		}
 
 		info.MigrateToChatID = m.MigrateToChatID
+		if m.LeftChatMember != nil {
+			info.LeftUserID = m.LeftChatMember.ID
+		}
 
 		if info != (Info{}) {
 			t.entries[u.UpdateID] = entry{info: info, at: now}

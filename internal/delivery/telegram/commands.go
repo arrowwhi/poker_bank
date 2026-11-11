@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arrowwhi/infrastructure/observability/logger"
 	tg "github.com/arrowwhi/infrastructure/telegram"
-	"go.uber.org/zap"
 
 	"poker_bank/internal/domain"
 	"poker_bank/internal/service"
@@ -35,7 +35,7 @@ func (h *Handler) handleNewGame(c *Context) error {
 		return c.Reply("❌ В этом чате уже есть активная игра. Используй /status для деталей.")
 	}
 	if !errors.Is(err, service.ErrNoActiveGame) {
-		h.log.Error("проверка активной игры", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("проверка активной игры")
 		return c.Reply("Внутренняя ошибка. Попробуй позже.")
 	}
 
@@ -93,7 +93,7 @@ func (h *Handler) createGame(c *Context, ctx context.Context, chatID, dealerID i
 	}
 	id, err := h.game.NewGame(ctx, g)
 	if err != nil {
-		h.log.Error("создание игры", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("создание игры")
 		return c.Reply("Ошибка при создании игры.")
 	}
 
@@ -220,7 +220,7 @@ func (h *Handler) doEndGame(c *Context, force bool) error {
 			mismatch.BankRub,
 		))
 	case err != nil:
-		h.log.Error("завершение игры", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("завершение игры")
 		return c.Reply("Ошибка при завершении игры.")
 	}
 
@@ -370,7 +370,7 @@ func (h *Handler) requestFromChat(c *Context, t domain.ActionType, chips int) er
 		return c.Reply(fmt.Sprintf("❌ %d фишек даёт нецелое число рублей. Курс: %s₽/фишку.",
 			chips, formatRate(game.BuyInRub, game.BuyInChips)))
 	case err != nil:
-		h.log.Error("создание запроса", zap.Error(err), zap.String("type", string(t)))
+		logger.Error(ctx).Err(err).Str("type", string(t)).Msg("создание запроса")
 		return c.Reply("Ошибка при создании запроса.")
 	}
 
@@ -950,7 +950,7 @@ func (h *Handler) handleStats(c *Context) error {
 func (h *Handler) statsLeaderboard(c *Context, ctx context.Context, chatID int64) error {
 	stats, err := h.game.GetLeaderboard(ctx, chatID)
 	if err != nil {
-		h.log.Error("leaderboard", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("leaderboard")
 		return c.Reply("Ошибка при получении статистики.")
 	}
 	if len(stats) == 0 {
@@ -980,7 +980,7 @@ func (h *Handler) statsPlayer(c *Context, ctx context.Context, chatID int64, use
 
 	results, err := h.game.GetPlayerStats(ctx, player.TelegramUserID, chatID)
 	if err != nil {
-		h.log.Error("player stats", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("player stats")
 		return c.Reply("Ошибка при получении статистики.")
 	}
 	if len(results) == 0 {
@@ -1061,7 +1061,7 @@ func (h *Handler) handlePendingCallback(c *Context, parts []string) error {
 	case errors.Is(err, service.ErrNotInGame):
 		return c.Respond(&CallbackResponse{Text: "Игрок уже не в игре.", ShowAlert: true})
 	case err != nil:
-		h.log.Error("решение по запросу", zap.Error(err), zap.Int64("pending_id", paID))
+		logger.Error(ctx).Err(err).Int64("pending_id", paID).Msg("решение по запросу")
 		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
@@ -1127,7 +1127,7 @@ func (h *Handler) handleEndGameCallback(c *Context, parts []string) error {
 		_ = c.Edit(fmt.Sprintf("⚠️ Расхождение: банк = %+d₽. Используй /endgame_force.", mismatch.BankRub))
 		return c.Respond()
 	case err != nil:
-		h.log.Error("завершение игры (callback)", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("завершение игры (callback)")
 		return c.Respond(&CallbackResponse{Text: "Ошибка при завершении игры."})
 	}
 
@@ -1167,13 +1167,13 @@ func (h *Handler) handleSettleCallback(c *Context, parts []string) error {
 
 	changed, err := h.game.MarkSettlementsByPlayer(ctx, gameID, senderID)
 	if err != nil {
-		h.log.Error("отметка переводов", zap.Error(err), zap.Int64("game_id", gameID))
+		logger.Error(ctx).Err(err).Int64("game_id", gameID).Msg("отметка переводов")
 		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
 	settlements, err := h.game.ListSettlements(ctx, gameID)
 	if err != nil {
-		h.log.Error("список переводов", zap.Error(err), zap.Int64("game_id", gameID))
+		logger.Error(ctx).Err(err).Int64("game_id", gameID).Msg("список переводов")
 		return c.Respond(&CallbackResponse{Text: "Ошибка. Попробуй позже."})
 	}
 
@@ -1321,7 +1321,7 @@ func (h *Handler) handleCancelCallback(c *Context, parts []string) error {
 
 	cancelled, err := h.game.CancelGame(ctx, game, c.Sender().ID)
 	if err != nil {
-		h.log.Error("отмена игры", zap.Error(err))
+		logger.Error(ctx).Err(err).Msg("отмена игры")
 		return c.Respond(&CallbackResponse{Text: "Ошибка при отмене игры."})
 	}
 	h.RequestsClosed(ctx, cancelled)
@@ -1504,7 +1504,7 @@ func (h *Handler) dealerButtonFailed(c *Context, err error) error {
 	case errors.Is(err, service.ErrInvalidChipsAmount):
 		return c.Respond(&CallbackResponse{Text: "❌ Фишки не дают целого числа рублей.", ShowAlert: true})
 	default:
-		h.log.Error("dealer action callback", zap.Error(err))
+		logger.Error(c).Err(err).Msg("dealer action callback")
 		return c.Respond(&CallbackResponse{Text: "Ошибка выполнения."})
 	}
 }

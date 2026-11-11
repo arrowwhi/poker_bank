@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/arrowwhi/infrastructure/observability/logger"
 
 	tg "github.com/arrowwhi/infrastructure/telegram"
 
@@ -44,7 +44,7 @@ func (h *Handler) TopicGuard(next tg.HandlerFunc) tg.HandlerFunc {
 
 		binding, err := h.chatTopic.Get(c, chat.ID)
 		if err != nil {
-			h.log.Warn("topic guard: get binding", zap.Error(err), zap.Int64("chat_id", chat.ID))
+			logger.Warn(c).Err(err).Int64("chat_id", chat.ID).Msg("topic guard: get binding")
 			return next(c) // fail open: do not break the bot on a DB hiccup
 		}
 		// No binding — behave as before (work everywhere).
@@ -86,7 +86,7 @@ func (h *Handler) maybeSendTopicHint(ctx context.Context, chatID int64, threadID
 		ReplyToMessageID: messageID,
 	})
 	if err != nil {
-		h.log.Warn("send topic hint", zap.Error(err), zap.Int64("chat_id", chatID))
+		logger.Warn(ctx).Err(err).Int64("chat_id", chatID).Msg("send topic hint")
 	}
 }
 

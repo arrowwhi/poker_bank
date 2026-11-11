@@ -6,8 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"poker_bank/internal/domain"
 	"poker_bank/internal/repository/postgres"
 	"poker_bank/internal/repository/postgres/pgtest"
@@ -31,7 +29,7 @@ func newPgService(t *testing.T) (*GameService, *domain.Game) {
 	s := NewGameService(
 		postgres.NewGameRepo(pool), postgres.NewLedgerRepo(pool), postgres.NewParticipantRepo(pool),
 		postgres.NewGameResultRepo(pool), postgres.NewSettlementRepo(pool), postgres.NewPendingActionRepo(pool),
-		postgres.NewChatRepo(pool), postgres.NewTxManager(pool), NewNoopSheetsExporter(), zap.NewNop(),
+		postgres.NewChatRepo(pool), postgres.NewTxManager(pool), NewNoopSheetsExporter(),
 	)
 	g, err := s.CreateGameIn(ctx, pgtest.SupergroupChatID, testDealer, 1000, 1000, 1000, 1000, true)
 	if err != nil {

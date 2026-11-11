@@ -11,8 +11,8 @@ import { haptic } from '../telegram/telegram';
 export type Act = (fn: () => Promise<GameDetail | unknown>, ok?: string) => Promise<boolean>;
 
 // ── Cash-out: ввод фишек с валидацией chips*rate ∈ ℤ ──
-export function CashoutSheet({ game, p, meId, mode, act, onClose }: {
-  game: GameDetail; p: Participant; meId: number; mode: 'dealer' | 'request'; act: Act; onClose: () => void;
+export function CashoutSheet({ game, p, meId, mode, act, busy, onClose }: {
+  game: GameDetail; p: Participant; meId: number; mode: 'dealer' | 'request'; act: Act; busy: boolean; onClose: () => void;
 }) {
   const [v, setV] = useState('');
   const n = v === '' ? null : Number(v);
@@ -35,6 +35,7 @@ export function CashoutSheet({ game, p, meId, mode, act, onClose }: {
   useMainButton({
     text: mode === 'dealer' ? (rubOut !== null ? `Cash-out · ${rub(rubOut)}` : 'Cash-out') : game.my_role === 'dealer' ? 'Выйти из игры' : 'Отправить дилеру на подтверждение',
     disabled: rubOut === null,
+    progress: busy,
     tone: mode === 'dealer' ? 'success' : 'accent',
     onClick: submit,
   });
@@ -58,9 +59,11 @@ export function CashoutSheet({ game, p, meId, mode, act, onClose }: {
 }
 
 // ── Действия дилера с конкретным игроком ──
-export function PlayerActionSheet({ game, p, meId, act, onClose, onCashout }: {
-  game: GameDetail; p: Participant; meId: number; act: Act; onClose: () => void; onCashout: () => void;
+export function PlayerActionSheet({ game, p, meId, act, busy, onClose, onCashout }: {
+  game: GameDetail; p: Participant; meId: number; act: Act; busy: boolean; onClose: () => void; onCashout: () => void;
 }) {
+  // Пока идёт запрос, строки действий не нажимаются: иначе второй тап отправит второй rebuy.
+  const tap = (fn: () => void) => (busy ? undefined : fn);
   const confirm = useConfirm();
   const last = [...game.ledger].reverse().find((e) => !e.is_void);
   const lastIsHis = last && last.player.id === p.user.id;
@@ -91,18 +94,18 @@ export function PlayerActionSheet({ game, p, meId, act, onClose, onCashout }: {
       <div className="card flush" style={{ background: 'var(--bg-secondary)', ['--sep-left' as string]: '64px' }}>
         {p.is_active ? (
           <>
-            <ListRow left={<div className="icon-box">🔁</div>} title={`Rebuy · ${rub(r.rebuy_rub)} → ${num(r.rebuy_chips)} фишек`} sub="Без подтверждения" chevron onClick={rebuy} />
-            <ListRow left={<div className="icon-box">💸</div>} title="Cash-out…" sub="Ввести фишки и вывести игрока" chevron onClick={onCashout} />
+            <ListRow left={<div className="icon-box">🔁</div>} title={`Rebuy · ${rub(r.rebuy_rub)} → ${num(r.rebuy_chips)} фишек`} sub="Без подтверждения" chevron onClick={tap(rebuy)} />
+            <ListRow left={<div className="icon-box">💸</div>} title="Cash-out…" sub="Ввести фишки и вывести игрока" chevron onClick={tap(onCashout)} />
             {p.user.id !== game.dealer.id && (
-              <ListRow left={<div className="icon-box">🎩</div>} title="Передать дилерство" sub="Только активному игроку" chevron onClick={transfer} />
+              <ListRow left={<div className="icon-box">🎩</div>} title="Передать дилерство" sub="Только активному игроку" chevron onClick={tap(transfer)} />
             )}
           </>
         ) : (
-          <ListRow left={<div className="icon-box">🃏</div>} title={`Вернуть в игру · Buy-in ${rub(r.buy_in_rub)}`} sub={`Вышел: ${chips(p.total_out_chips)}`} chevron onClick={buyin} />
+          <ListRow left={<div className="icon-box">🃏</div>} title={`Вернуть в игру · Buy-in ${rub(r.buy_in_rub)}`} sub={`Вышел: ${chips(p.total_out_chips)}`} chevron onClick={tap(buyin)} />
         )}
         {lastIsHis && last && (
           <ListRow left={<div className="icon-box" style={{ background: 'var(--status-danger-soft)', color: 'var(--status-danger)' }}>↩️</div>}
-            title={<span className="neg">Отменить последнее действие</span>} sub={`Undo: ${ledgerLabel(last.type)} ${handle(last.player)}, ${time(last.created_at)}`} onClick={undo} />
+            title={<span className="neg">Отменить последнее действие</span>} sub={`Undo: ${ledgerLabel(last.type)} ${handle(last.player)}, ${time(last.created_at)}`} onClick={tap(undo)} />
         )}
       </div>
     </Sheet>
@@ -112,8 +115,8 @@ export function PlayerActionSheet({ game, p, meId, act, onClose, onCashout }: {
 // ── Выбор игрока для buy-in / rebuy / cash-out ──
 export type PickMode = 'buyin' | 'rebuy' | 'cashout';
 
-export function PlayerPickerSheet({ game, mode, meId, act, onClose, onCashout }: {
-  game: GameDetail; mode: PickMode; meId: number; act: Act; onClose: () => void; onCashout: (p: Participant) => void;
+export function PlayerPickerSheet({ game, mode, meId, act, busy, onClose, onCashout }: {
+  game: GameDetail; mode: PickMode; meId: number; act: Act; busy: boolean; onClose: () => void; onCashout: (p: Participant) => void;
 }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<User | null>(null);
@@ -158,7 +161,7 @@ export function PlayerPickerSheet({ game, mode, meId, act, onClose, onCashout }:
     if (ok) onClose();
   };
 
-  useMainButton({ text: sel ? `${verb} для ${handle(sel)}` : 'Выберите игрока', disabled: !sel, onClick: go });
+  useMainButton({ text: sel ? `${verb} для ${handle(sel)}` : 'Выберите игрока', disabled: !sel, progress: busy, onClick: go });
 
   return (
     <Sheet title={title}

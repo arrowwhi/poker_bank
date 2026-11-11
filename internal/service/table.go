@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	infrapg "github.com/arrowwhi/infrastructure/connections/postgres"
 
 	"poker_bank/internal/domain"
 )
@@ -46,7 +46,7 @@ type EndResult struct {
 // GameByID возвращает игру или ErrNotFound.
 func (s *GameService) GameByID(ctx context.Context, id int64) (*domain.Game, error) {
 	g, err := s.games.GetByID(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return g, err
@@ -76,7 +76,7 @@ func requireActiveDealer(g *domain.Game, userID int64) error {
 // *g обновляется актуальными данными, чтобы вызывающий видел то же, что и сервис.
 func (s *GameService) lockGame(ctx context.Context, g *domain.Game) (*domain.Game, error) {
 	cur, err := s.games.LockByID(ctx, g.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -98,10 +98,10 @@ func (s *GameService) lockDealer(ctx context.Context, g *domain.Game, userID int
 	return cur, nil
 }
 
-// notActiveErr переводит отказ репозитория изменить неактивную игру (pgx.ErrNoRows
+// notActiveErr переводит отказ репозитория изменить неактивную игру (infrapg.ErrNoRows
 // от Finish/Cancel/UpdateDealer) в ErrGameNotActive.
 func notActiveErr(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return ErrGameNotActive
 	}
 	return err
@@ -110,7 +110,7 @@ func notActiveErr(err error) error {
 // IsActivePlayer сообщает, сидит ли игрок за столом (buy-in без cash-out).
 func (s *GameService) IsActivePlayer(ctx context.Context, gameID, tgID int64) (bool, error) {
 	p, err := s.participants.GetByPlayer(ctx, gameID, tgID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -178,7 +178,7 @@ func (s *GameService) CreateRequest(ctx context.Context, g *domain.Game, userID 
 
 		if _, err := s.pending.GetPending(ctx, cur.ID, userID, t); err == nil {
 			return ErrPendingExists
-		} else if !errors.Is(err, pgx.ErrNoRows) {
+		} else if !errors.Is(err, infrapg.ErrNoRows) {
 			return err
 		}
 
@@ -263,7 +263,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 	res := &ResolveResult{}
 	err := s.tx.InTx(ctx, func(ctx context.Context) error {
 		pa, err := s.pending.GetByID(ctx, paID)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
@@ -289,7 +289,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 			status = domain.PendingStatusConfirmed
 		}
 		resolved, err := s.pending.Resolve(ctx, paID, status, dealerID)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, infrapg.ErrNoRows) {
 			return ErrAlreadyResolved
 		}
 		if err != nil {
@@ -338,7 +338,7 @@ func (s *GameService) ResolveRequest(ctx context.Context, paID, dealerID int64, 
 // CancelRequest — игрок отзывает свой запрос.
 func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID int64) (*domain.PendingAction, error) {
 	pa, err := s.pending.GetByID(ctx, paID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && pa.GameID != gameID) {
+	if errors.Is(err, infrapg.ErrNoRows) || (err == nil && pa.GameID != gameID) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -348,7 +348,7 @@ func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID in
 		return nil, ErrNotRequester
 	}
 	cancelled, err := s.pending.CancelOne(ctx, paID, userID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return pa, ErrAlreadyResolved
 	}
 	return cancelled, err
@@ -357,14 +357,14 @@ func (s *GameService) CancelRequest(ctx context.Context, gameID, paID, userID in
 // cancelPendingOf отменяет висящий запрос игрока данного типа (дилер сделал действие сам).
 func (s *GameService) cancelPendingOf(ctx context.Context, gameID, target int64, t domain.ActionType, by int64) ([]domain.PendingAction, error) {
 	pa, err := s.pending.GetPending(ctx, gameID, target, t)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	c, err := s.pending.CancelOne(ctx, pa.ID, by)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, infrapg.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

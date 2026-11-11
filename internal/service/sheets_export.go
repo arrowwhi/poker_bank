@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"poker_bank/internal/domain"
 	"poker_bank/internal/interfaces"
 )
@@ -26,7 +24,6 @@ type GoogleSheetsExporter struct {
 	ledger      interfaces.LedgerRepository
 	settlements interfaces.SettlementRepository
 	players     interfaces.PlayerRepository
-	log         *zap.Logger
 }
 
 // NewGoogleSheetsExporter creates a GoogleSheetsExporter wired to the given client and repositories.
@@ -36,7 +33,6 @@ func NewGoogleSheetsExporter(
 	ledger interfaces.LedgerRepository,
 	settlements interfaces.SettlementRepository,
 	players interfaces.PlayerRepository,
-	log *zap.Logger,
 ) *GoogleSheetsExporter {
 	return &GoogleSheetsExporter{
 		client:      client,
@@ -44,7 +40,6 @@ func NewGoogleSheetsExporter(
 		ledger:      ledger,
 		settlements: settlements,
 		players:     players,
-		log:         log,
 	}
 }
 

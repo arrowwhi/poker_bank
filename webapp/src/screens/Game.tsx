@@ -22,9 +22,14 @@ export function GameScreen({ id }: { id: number }) {
   const game = g.data;
   const [tab, setTab] = useState<'dealer' | 'player'>('dealer');
   const [busy, setBusy] = useState(false);
+  // Замок на время запроса: состояние busy доходит до кнопок только после рендера, а второй
+  // тап по нативной MainButton может прийти раньше — тогда действие ушло бы дважды.
+  const inFlight = useRef(false);
 
-  /** Обёртка мутаций: прогресс, haptic, тост, обновление данных. */
+  /** Обёртка мутаций: прогресс, haptic, тост, обновление данных. Пока идёт одна, другие не запускаются. */
   const act: Act = useCallback(async (fn, ok) => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
     setBusy(true);
     try {
       const res = await fn();
@@ -39,6 +44,7 @@ export function GameScreen({ id }: { id: number }) {
       await g.reload();
       return false;
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }, [g, toast]);
@@ -248,7 +254,7 @@ function PlayerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
 
       <Participants game={game} meId={meId} />
 
-      {cashout && me && <CashoutSheet game={game} p={me} meId={meId} mode="request" act={act} onClose={() => setCashout(false)} />}
+      {cashout && me && <CashoutSheet game={game} p={me} meId={meId} mode="request" act={act} busy={busy} onClose={() => setCashout(false)} />}
     </>
   );
 }
@@ -274,7 +280,15 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
   // продолжат считать, что я в игре.
   const refreshMe = () => reloadMe().catch(() => undefined);
 
+  // Завершение идёт мимо act (своя обработка bank_mismatch), поэтому и замок свой.
+  const [ending, setEnding] = useState(false);
+  const endingRef = useRef(false);
+
   const finish = async (force: boolean) => {
+    if (endingRef.current) return;
+    endingRef.current = true;
+    setEnding(true);
+    let retryForced = false;
     try {
       const d = await api.endGame(game.id, force);
       haptic.success();
@@ -285,14 +299,20 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
       if (e instanceof ApiError && e.code === 'bank_mismatch') {
         haptic.warning();
         const delta = Number(e.details?.bank_rub ?? game.bank_rub);
-        if (await confirm(forceDialog(delta))) void finish(true);
+        retryForced = await confirm(forceDialog(delta));
       } else {
         haptic.error();
+        endingRef.current = false;
         await act(() => Promise.reject(e));
       }
+    } finally {
+      endingRef.current = false;
+      setEnding(false);
     }
+    if (retryForced) await finish(true);
   };
   const end = async () => {
+    if (endingRef.current || busy) return;
     if (mismatch) {
       if (await confirm(forceDialog(game.bank_rub))) void finish(true);
       return;
@@ -312,9 +332,9 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
   // Завершение игры живёт только в MainButton: в контенте его нет, чтобы на экране было одно главное действие.
   const noSheet = !picker && !actionFor && !cashoutFor;
   useMainButton(!noSheet ? null :
-    ready ? { text: '🏁 Завершить игру', tone: 'success', onClick: end } :
-    mismatch ? { text: `Завершить с расхождением ${signedRub(game.bank_rub)}`, tone: 'danger', onClick: end } :
-    { text: '＋ Buy-in игрока', onClick: () => setPicker('buyin') });
+    ready ? { text: '🏁 Завершить игру', tone: 'success', progress: ending || busy, onClick: end } :
+    mismatch ? { text: `Завершить с расхождением ${signedRub(game.bank_rub)}`, tone: 'danger', progress: ending || busy, onClick: end } :
+    { text: '＋ Buy-in игрока', progress: busy, onClick: () => setPicker('buyin') });
 
   return (
     <>
@@ -365,14 +385,14 @@ function DealerView({ game, meId, act, busy }: { game: GameDetail; meId: number;
       )}
 
       {picker && (
-        <PlayerPickerSheet game={game} mode={picker} meId={meId} act={act} onClose={() => setPicker(null)}
+        <PlayerPickerSheet game={game} mode={picker} meId={meId} act={act} busy={busy} onClose={() => setPicker(null)}
           onCashout={(p) => { setPicker(null); setCashoutFor(p); }} />
       )}
       {actionFor && (
-        <PlayerActionSheet game={game} p={game.participants.find((x) => x.user.id === actionFor.user.id) ?? actionFor} meId={meId} act={act}
+        <PlayerActionSheet game={game} p={game.participants.find((x) => x.user.id === actionFor.user.id) ?? actionFor} meId={meId} act={act} busy={busy}
           onClose={() => setActionFor(null)} onCashout={() => { setCashoutFor(actionFor); setActionFor(null); }} />
       )}
-      {cashoutFor && <CashoutSheet game={game} p={cashoutFor} meId={meId} mode="dealer" act={act} onClose={() => setCashoutFor(null)} />}
+      {cashoutFor && <CashoutSheet game={game} p={cashoutFor} meId={meId} mode="dealer" act={act} busy={busy} onClose={() => setCashoutFor(null)} />}
     </>
   );
 }
